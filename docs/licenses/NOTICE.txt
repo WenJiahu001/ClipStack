@@ -1,0 +1,20 @@
+ClipStack third-party attribution
+
+.NET Runtime, WPF, Windows Forms, Microsoft.Data.Sqlite
+Copyright (c) .NET Foundation and Contributors
+Copyright (c) Microsoft Corporation. All rights reserved.
+Licensed under the MIT License. See MIT.txt.
+https://github.com/dotnet/runtime
+https://github.com/dotnet/wpf
+https://github.com/dotnet/efcore
+
+SQLitePCLRaw.core, SQLitePCLRaw.provider.e_sqlite3,
+SQLitePCLRaw.bundle_e_sqlite3, SQLitePCLRaw.lib.e_sqlite3
+Copyright 2014-2024 SourceGear, LLC
+Licensed under the Apache License, Version 2.0. See Apache-2.0.txt.
+https://github.com/ericsink/SQLitePCL.raw
+
+SQLite
+SQLite is in the public domain. https://sqlite.org/copyright.html
+
+Additional .NET runtime third-party attributions are included in DOTNET-NOTICES.txt.

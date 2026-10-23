@@ -1,0 +1,15 @@
+.tools/
+**/bin/
+**/obj/
+artifacts/
+.vs/
+*.user
+*.suo
+.env
+.env.*
+*.pfx
+*.p12
+*.key
+*.db
+*.db-shm
+*.db-wal

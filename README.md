@@ -2,11 +2,21 @@
 
 Windows 剪贴板历史工具。下载 `ClipStack.exe` 后双击运行，无需安装 .NET、数据库或浏览器组件，无需管理员权限；文本、图片及缩略图加密保存在当前用户目录。
 
+面向个人自用，保持轻量、实用。使用 MIT 许可证开源。
+
+## 下载
+
+前往 [GitHub Releases](https://github.com/WenJiahu001/ClipStack/releases/latest)，下载 `ClipStack-win-x64.zip`，解压后运行 `ClipStack.exe`。也可直接下载单文件 EXE。
+
+支持 Windows 10 22H2 / Windows 11 x64。当前版本未签名，下载运行时可能出现未知发布者或 SmartScreen 提示。
+
 ## 使用
 
 - 默认按 `Ctrl + Alt + V` 打开面板；方向键选择，回车尝试粘贴，`Ctrl + C` 仅复制，`Esc` 隐藏。
 - 支持文本与截图、搜索、收藏备注、自动清理、托盘暂停及开机启动；首次靠右呼出，拖动后记住位置。
-- 退出请使用托盘菜单。详细说明见 [使用说明](docs/使用说明.md)。
+- 浅色界面，支持紧凑、标准、宽松三种密度；收藏备注原位编辑，最多 50 个可见字符。
+- 可配置记住位置、跟随鼠标、屏幕中间或屏幕右侧，以及激活时回到列表首条。
+- 托盘图标可关闭，窗口不占用任务栏；退出可使用托盘菜单或主界面「更多 → 退出」。详细说明见 [使用说明](docs/使用说明.md)。
 
 ## 开发与验证
 
@@ -21,7 +31,7 @@ dotnet run --project tests/ClipStack.Tests/ClipStack.Tests.csproj -c Release
 
 发布产物位于 `artifacts/publish/win-x64/ClipStack.exe`，只有 EXE 是运行必需文件。SQLite 及 .NET 原生库随 EXE 打包，启动时自动释放到运行时的临时缓存。
 
-发布脚本统一将 EXE、ZIP、SQL、截图及检查报告输出到 `artifacts/publish/win-x64`；构建前会停止该目录中正在运行的旧版。ZIP 为 `ClipStack-win-x64.zip`。
+发布脚本统一将 EXE、ZIP、SQL、截图及检查报告输出到 `artifacts/publish/win-x64`；构建前会停止该目录中正在运行的旧版。公开 ZIP 为 `ClipStack-win-x64.zip`，仅包含程序、使用说明、许可证和校验文件；本机诊断报告保留在本地。
 
 实际第三方依赖仅 `Microsoft.Data.Sqlite` 及其 SQLitePCLRaw 传递依赖，锁文件随源码提交；不使用 UI 框架包、ORM 或额外测试框架。
 
@@ -66,4 +76,8 @@ ClipStack.exe --performance-test "C:\temp\performance-checks.json" --data-dir "C
 
 首版兼容目标为 Windows 10 22H2 / Windows 11 x64。源代码及当前机器验证不等于完成全部兼容验收；准确结果见 [验收记录](docs/验收记录.md)。
 
-正式公开分发前须签名并完成干净机器测试。签名可降低未知发布者问题，但不能保证新程序在每台设备上均无 SmartScreen 提示。企业策略可能阻止未知应用。
+当前发布包未签名，干净机器与多显示器兼容验证仍待补充。签名可降低未知发布者问题，但不能保证新程序在每台设备上均无 SmartScreen 提示。企业策略可能阻止未知应用。
+
+## 许可证
+
+本项目采用 [MIT](LICENSE) 许可证。第三方组件保留各自的许可证，见 [第三方组件](docs/第三方组件.md)。

@@ -1,0 +1,18 @@
+<Window x:Class="ClipStack.App.ContentWindow"
+ xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation" xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+ Title="查看内容" Style="{StaticResource {x:Type Window}}" Width="620" Height="520" MinWidth="360" MinHeight="300"
+ WindowStartupLocation="CenterOwner" ShowInTaskbar="False" PreviewKeyDown="OnPreviewKeyDown">
+ <Grid Margin="18">
+  <Grid.RowDefinitions><RowDefinition Height="Auto" /><RowDefinition Height="Auto" /><RowDefinition Height="*" /><RowDefinition Height="Auto" /></Grid.RowDefinitions>
+  <TextBlock Text="{Binding PreviewDetail}" Foreground="{StaticResource Muted}" FontSize="11" Margin="0,0,0,14" />
+  <Border Grid.Row="1" Visibility="{Binding SelectedItem.NoteVisibility}" Background="#EDF3FF" BorderBrush="#C6D7F3" BorderThickness="2,0,0,0" Padding="10,8" Margin="0,0,0,12">
+   <StackPanel><TextBlock Text="备注" Foreground="#6981A2" FontSize="10" Margin="0,0,0,4" /><TextBlock Text="{Binding SelectedItem.NoteLabel}" TextWrapping="Wrap" Foreground="#365882" /></StackPanel>
+  </Border>
+  <TextBox Grid.Row="2" Text="{Binding PreviewText, Mode=OneWay}" IsReadOnly="True" TextWrapping="Wrap" AcceptsReturn="True"
+   VerticalScrollBarVisibility="Auto" VerticalContentAlignment="Top" Visibility="{Binding TextPreviewVisibility}" AutomationProperties.Name="完整文本预览" />
+  <ScrollViewer Grid.Row="2" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Auto" Visibility="{Binding ImagePreviewVisibility}">
+   <Image Source="{Binding PreviewImage}" Stretch="None" />
+  </ScrollViewer>
+  <Button Grid.Row="3" Content="关闭" IsCancel="True" Padding="18,7" Margin="0,14,0,0" HorizontalAlignment="Right" />
+ </Grid>
+</Window>

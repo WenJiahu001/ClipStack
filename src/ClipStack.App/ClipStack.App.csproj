@@ -1,0 +1,20 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <UseWPF>true</UseWPF>
+    <UseWindowsForms>true</UseWindowsForms>
+    <AssemblyName>ClipStack</AssemblyName>
+    <ApplicationManifest>app.manifest</ApplicationManifest>
+    <ApplicationIcon>Assets/clipstack.ico</ApplicationIcon>
+    <RestorePackagesWithLockFile>true</RestorePackagesWithLockFile>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="../ClipStack.Core/ClipStack.Core.csproj" />
+  </ItemGroup>
+  <ItemGroup>
+    <Resource Include="Assets/clipstack.ico" />
+    <EmbeddedResource Include="Assets/clipstack.ico" />
+    <EmbeddedResource Include="../../docs/licenses/*.txt" LogicalName="ClipStack.Licenses.%(Filename)%(Extension)" />
+    <EmbeddedResource Include="../../LICENSE" LogicalName="ClipStack.Licenses.ClipStack-MIT.txt" />
+  </ItemGroup>
+</Project>

@@ -1,0 +1,21 @@
+<UserControl x:Class="ClipStack.App.Controls.InlineNoteEditor"
+ xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation" xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+ Focusable="False" Unloaded="OnUnloaded">
+ <Grid>
+  <Button x:Name="DisplayButton" Click="OnBeginEdit" Background="Transparent" Foreground="{StaticResource Muted}" Padding="2,1" MaxWidth="190" HorizontalAlignment="Right" AutomationProperties.Name="编辑备注">
+   <Button.ToolTip><StackPanel MaxWidth="300"><TextBlock x:Name="FullNoteText" TextWrapping="Wrap" /><TextBlock Text="点击原地编辑，Enter 保存，Esc 取消" Foreground="{StaticResource Muted}" FontSize="10" Margin="0,5,0,0" /></StackPanel></Button.ToolTip>
+   <Grid><Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
+    <TextBlock x:Name="DisplayText" FontSize="10" TextTrimming="CharacterEllipsis" VerticalAlignment="Center" />
+    <TextBlock Grid.Column="1" FontFamily="Segoe MDL2 Assets" Text="&#xE70F;" FontSize="10" VerticalAlignment="Center" Margin="5,0,0,0" />
+   </Grid>
+  </Button>
+  <StackPanel x:Name="EditorPanel" Visibility="Collapsed" Width="230">
+   <TextBox x:Name="Editor" FontSize="11" Height="28" Padding="6,2" VerticalContentAlignment="Center" AutomationProperties.Name="备注输入框"
+    TextChanged="OnTextChanged" PreviewKeyDown="OnEditorKeyDown" LostKeyboardFocus="OnEditorLostFocus" />
+   <DockPanel Margin="1,3,1,0">
+    <TextBlock x:Name="Counter" DockPanel.Dock="Right" FontSize="10" Foreground="{StaticResource Muted}" />
+    <TextBlock x:Name="ErrorText" FontSize="10" Foreground="#B42318" TextWrapping="Wrap" Margin="0,0,7,0" />
+   </DockPanel>
+  </StackPanel>
+ </Grid>
+</UserControl>
