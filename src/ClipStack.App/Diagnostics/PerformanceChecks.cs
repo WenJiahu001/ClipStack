@@ -89,6 +89,16 @@ internal static class PerformanceChecks
             await Task.WhenAll(searches);
             Check("快速搜索只显示最新请求结果", model.Items.Count == 1 && model.Items[0].Id == newestSearchId);
             model.QueryText = ""; await history.RefreshAsync();
+            ClipItem usedItem = model.Items.Single(item => item.Id == largeId);
+            panel.ApplySettings(new AppSettings { ResetListOnActivate = false });
+            list.ScrollIntoView(model.Items.Last()); await IdleAsync(panel);
+            await Task.Run(() => store.MarkUsed(largeId));
+            await history.RefreshAsync(largeId); panel.RevealSelectedHistoryItem(); await IdleAsync(panel);
+            Check("关闭激活重置时使用记录仍置顶并显示，复用原对象", model.Items[0] == usedItem
+                && model.SelectedItem == usedItem && FindScrollViewer(list)?.VerticalOffset == 0);
+            await Task.Run(() => store.Save(CapturedClip.FromText("唯一最新搜索结果")));
+            await history.RefreshAsync();
+            Check("重复复制置顶且不增加列表条数", model.Items[0].Id == newestSearchId && model.Items.Count == 42);
             int saved = 0;
             var worker = new ClipboardCaptureWorker(store, paths, result =>
             {
@@ -124,6 +134,14 @@ internal static class PerformanceChecks
         }
         return success;
         void Check(string name, bool passed) { success &= passed; checks.Add(new { name, passed }); }
+    }
+
+    private static ScrollViewer? FindScrollViewer(DependencyObject parent)
+    {
+        if (parent is ScrollViewer viewer) return viewer;
+        for (int i = 0; i < VisualTreeHelper.GetChildrenCount(parent); i++)
+            if (FindScrollViewer(VisualTreeHelper.GetChild(parent, i)) is { } found) return found;
+        return null;
     }
     private static async Task IdleAsync(Window window) => await window.Dispatcher.InvokeAsync(() => { }, DispatcherPriority.ApplicationIdle);
     private static BitmapSource CreateImage(int width, int height, byte color)

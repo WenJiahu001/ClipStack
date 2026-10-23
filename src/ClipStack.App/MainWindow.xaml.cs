@@ -20,7 +20,7 @@ public partial class MainWindow : Window
 {
     private readonly WindowPlacementController placement;
     private readonly HashSet<InlineNoteEditor> noteEditors = new();
-    private bool resetListOnActivate = true, resetAfterRefresh;
+    private bool resetListOnActivate = true, hideAfterCopy = true, resetAfterRefresh;
     internal MainViewModel Model { get; }
     internal bool KeepOpen { get; set; }
     internal bool PreviewMode { get; set; }
@@ -57,6 +57,7 @@ public partial class MainWindow : Window
     {
         ApplyDensity(settings.MainWindowDensity);
         resetListOnActivate = settings.ResetListOnActivate;
+        hideAfterCopy = settings.HideAfterCopy;
         placement.Mode = settings.WindowPosition;
         if (!resetListOnActivate) resetAfterRefresh = false;
     }
@@ -73,6 +74,11 @@ public partial class MainWindow : Window
         Model.SelectedItem = Model.Items.FirstOrDefault();
         HistoryList.ApplyTemplate();
         FindScrollViewer(HistoryList)?.ScrollToTop();
+    }
+
+    internal void RevealSelectedHistoryItem()
+    {
+        if (!Model.IsEditingNote && Model.SelectedItem != null) HistoryList.ScrollIntoView(Model.SelectedItem);
     }
 
     private static ScrollViewer? FindScrollViewer(DependencyObject parent)
@@ -145,6 +151,7 @@ public partial class MainWindow : Window
         return true;
     }
     internal async Task TryHideAsync() { if (await CommitPendingNotesAsync()) Hide(); }
+    internal Task OnCopyCompletedAsync() => hideAfterCopy ? TryHideAsync() : Task.CompletedTask;
     private void OnTitleDrag(object sender, MouseButtonEventArgs e)
     {
         if (e.ChangedButton == MouseButton.Left && !IsButtonSource(e.OriginalSource as DependencyObject))

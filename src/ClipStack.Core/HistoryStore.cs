@@ -56,7 +56,7 @@ public sealed class HistoryStore : IDisposable
                 string? id = existing.ExecuteScalar() as string;
                 if (id != null)
                 {
-                    Execute("UPDATE clips SET copied_utc=MAX(copied_utc,$now) WHERE id=$id;", null, ("$now", now), ("$id", id));
+                    Promote(id, now, used: false);
                     return new SaveResult(true, "已更新重复内容的复制时间", id);
                 }
             }
@@ -228,7 +228,16 @@ public sealed class HistoryStore : IDisposable
 
     public void MarkUsed(string id)
     {
-        lock (gate) { EnsureOpen(); Execute("UPDATE clips SET used_utc=$now WHERE id=$id;", null, ("$now", DateTimeOffset.UtcNow.ToUnixTimeMilliseconds()), ("$id", id)); }
+        lock (gate) { EnsureOpen(); Promote(id, DateTimeOffset.UtcNow.ToUnixTimeMilliseconds(), used: true); }
+    }
+
+    private void Promote(string id, long now, bool used)
+    {
+        // 复用复制时间的排序索引；同毫秒或时钟回拨时仍严格排到首位，保留原 ID、收藏和备注。
+        Execute("""
+            UPDATE clips SET copied_utc=MAX($now,(SELECT MAX(copied_utc)+1 FROM clips)),
+                used_utc=CASE WHEN $used=1 THEN $now ELSE used_utc END WHERE id=$id;
+            """, null, ("$now", now), ("$used", used ? 1 : 0), ("$id", id));
     }
 
     public void Delete(string id) => DeleteWhere("id=$id", ("$id", id));

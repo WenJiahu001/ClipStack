@@ -18,7 +18,7 @@ internal static class Program
     {
         if (args.Length == 2 && args[0] == "--performance-report") return PerformanceBenchmarks.Run(args[1]);
         Run("中文、表情、空白及换行完整保存", TextRoundTrip);
-        Run("重复内容更新复制时间，使用不改变复制顺序", Deduplication);
+        Run("使用与重复复制均置顶、去重并保留收藏备注", Deduplication);
         Run("同内容的不同类型分别保存", SeparateKinds);
         Run("文本、图片、缩略图均加密落盘", EncryptionAtRest);
         Run("搜索完整正文并限制列表摘要大小", FullTextSearch);
@@ -80,12 +80,35 @@ internal static class Program
         using var context = new Context();
         DateTimeOffset time = DateTimeOffset.UtcNow;
         SaveResult a = context.Store.Save(CapturedClip.FromText("A"), time.AddMinutes(-5));
+        DateTimeOffset createdAt = context.Store.Query().Single().CreatedAt;
         context.Store.Save(CapturedClip.FromText("B"), time.AddMinutes(-2));
+        context.Store.SetFavorite(a.Id!, true); context.Store.SetNote(a.Id!, "常用内容");
         context.Store.MarkUsed(a.Id!);
-        Assert(context.Store.Query()[0].Text == "B");
+        Assert(context.Store.Query()[0].Id == a.Id && context.Store.Query()[0].UsedAt != null);
+        DateTimeOffset usedTime = context.Store.Query()[0].CopiedAt;
+        SaveResult b = context.Store.Save(CapturedClip.FromText("B"), usedTime);
+        Assert(context.Store.Query()[0].Id == b.Id);
+        // 相同时间戳重复复制，仍应严格置顶，不受 SQL 并列顺序影响。
         SaveResult repeated = context.Store.Save(CapturedClip.FromText("A"), time);
         Assert(repeated.Id == a.Id && context.Store.GetStatistics().Count == 2);
-        Assert(context.Store.Query()[0].UsedAt != null && context.Store.Query()[0].Text == "A");
+        ClipEntry first = context.Store.Query()[0];
+        Assert(first.Id == a.Id && first.Favorite && first.Note == "常用内容" && first.CreatedAt == createdAt);
+        Assert(first.CopiedAt > context.Store.Query()[1].CopiedAt && first.UsedAt != null);
+        context.Store.MarkUsed(b.Id!);
+        Assert(context.Store.Query()[0].Id == b.Id);
+        context.Store.MarkUsed("已删除记录");
+        Assert(context.Store.GetStatistics().Count == 2);
+
+        SaveResult image = context.Store.Save(Image());
+        context.Store.SetFavorite(image.Id!, true); context.Store.SetNote(image.Id!, "参考图片");
+        string[] files = Directory.GetFiles(context.Paths.Images).OrderBy(x => x).ToArray();
+        context.Store.MarkUsed(image.Id!);
+        SaveResult sameImage = context.Store.Save(Image());
+        first = context.Store.Query()[0];
+        Assert(sameImage.Id == image.Id && first.Id == image.Id && first.Favorite && first.Note == "参考图片");
+        Assert(context.Store.GetStatistics().Count == 3 && files.SequenceEqual(Directory.GetFiles(context.Paths.Images).OrderBy(x => x)));
+        using var reopened = new HistoryStore(new AppPaths(context.Paths.Root), new AppSettings());
+        Assert(reopened.Query()[0].Id == image.Id && reopened.Query()[0].Note == "参考图片");
     }
     private static void SeparateKinds()
     {
@@ -417,13 +440,13 @@ internal static class Program
         Assert((normalized with { MainWindowDensity = (DisplayDensity)99 }).Normalize().MainWindowDensity == DisplayDensity.Standard);
         foreach (PanelPositionMode mode in Enum.GetValues<PanelPositionMode>())
         {
-            context.Paths.SaveSettings(normalized with { WindowPosition = mode, ResetListOnActivate = false, ShowTrayIcon = false });
-            Assert(context.Paths.LoadSettings() is { ResetListOnActivate: false, ShowTrayIcon: false } loaded && loaded.WindowPosition == mode);
+            context.Paths.SaveSettings(normalized with { WindowPosition = mode, ResetListOnActivate = false, ShowTrayIcon = false, HideAfterCopy = false });
+            Assert(context.Paths.LoadSettings() is { ResetListOnActivate: false, ShowTrayIcon: false, HideAfterCopy: false } loaded && loaded.WindowPosition == mode);
         }
         Assert((normalized with { WindowPosition = (PanelPositionMode)99 }).Normalize().WindowPosition == PanelPositionMode.Remember);
         File.WriteAllText(context.Paths.Settings, "{\"MaxEntries\":250,\"ShowTaskbarIcon\":false}");
         Assert(context.Paths.LoadSettings() is { MaxEntries: 250, MainWindowDensity: DisplayDensity.Standard,
-            WindowPosition: PanelPositionMode.Remember, ResetListOnActivate: true, ShowTrayIcon: true });
+            WindowPosition: PanelPositionMode.Remember, ResetListOnActivate: true, ShowTrayIcon: true, HideAfterCopy: true });
         File.WriteAllText(context.Paths.Settings, "{invalid-json");
         Assert(context.Paths.LoadSettings().MaxEntries == 1000);
         Assert(Directory.GetFiles(context.Paths.Root, "settings.json.invalid-*").Length == 1);

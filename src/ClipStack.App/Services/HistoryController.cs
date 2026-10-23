@@ -165,7 +165,18 @@ internal sealed class HistoryController : IDisposable
                 if (!sent) Notify("内容已复制。请返回目标应用，按 Ctrl+V 手动粘贴。");
                 else SetStatus("已发送粘贴操作；目标应用若未接收，可按 Ctrl+V 再试。");
             }
-            else SetStatus("已复制到系统剪贴板，按 Ctrl+V 使用。");
+            else
+            {
+                SetStatus("已复制到系统剪贴板，按 Ctrl+V 使用。");
+                // 只在复制成功后隐藏；沿用备注提交保护，避免丢失操作期间输入的草稿。
+                await panel.OnCopyCompletedAsync();
+            }
+            // 自身写入剪贴板会被监听器忽略，成功使用后须主动刷新排序。
+            await GuardAsync("history-use-refresh", async () =>
+            {
+                await RefreshAsync(item.Id);
+                panel.RevealSelectedHistoryItem();
+            });
         }
         catch (Exception error) { paths.LogError("clipboard-write", error); SetStatus("复制失败，请稍后重试。原始记录已保留。"); }
         finally { usingClip = false; }

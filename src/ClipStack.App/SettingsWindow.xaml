@@ -25,6 +25,8 @@
         <TextBlock Text="下次呼出时生效；记住位置模式首次在屏幕右侧显示。" FontSize="11" Foreground="{StaticResource Muted}" TextWrapping="Wrap" Margin="0,6,0,8" />
         <CheckBox x:Name="ResetListBox" Content="激活窗口时，滚动至顶部并选中首条" />
         <TextBlock Text="作用于当前搜索和分类下的记录，默认开启。" FontSize="11" Foreground="{StaticResource Muted}" Margin="0,0,0,18" />
+        <CheckBox x:Name="HideAfterCopyBox" Content="复制后隐藏窗口" />
+        <TextBlock Text="复制成功后自动隐藏，适用于复制按钮和 Ctrl+C，默认开启。" FontSize="11" Foreground="{StaticResource Muted}" TextWrapping="Wrap" Margin="0,0,0,18" />
         <CheckBox x:Name="TrayIconBox" Content="显示托盘图标" />
         <TextBlock Text="保存后立即生效；关闭后仍可通过快捷键呼出。" FontSize="11" Foreground="{StaticResource Muted}" TextWrapping="Wrap" Margin="0,0,0,18" />
         <TextBlock Text="全局快捷键" Foreground="{StaticResource Muted}" Margin="0,0,0,7" />

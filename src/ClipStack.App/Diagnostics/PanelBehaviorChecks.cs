@@ -34,7 +34,8 @@ internal static class PanelBehaviorChecks
                     tray.SetVisible(next.ShowTrayIcon);
                     AppSettings loaded = new AppPaths(paths.Root).LoadSettings();
                     saved = loaded.WindowPosition == mode && loaded.ResetListOnActivate == reset
-                        && loaded.ShowTrayIcon == reset && tray.IsVisible == reset && !panel.ShowInTaskbar && panel.IsVisible;
+                        && loaded.ShowTrayIcon == reset && loaded.HideAfterCopy == reset
+                        && tray.IsVisible == reset && !panel.ShowInTaskbar && panel.IsVisible;
                     return Task.FromResult<string?>(null);
                 }) { Owner = panel };
                 settings.Loaded += (_, _) =>
@@ -46,6 +47,7 @@ internal static class PanelBehaviorChecks
                     };
                     ((RadioButton)settings.FindName(option)).IsChecked = true;
                     ((CheckBox)settings.FindName("ResetListBox")).IsChecked = reset;
+                    ((CheckBox)settings.FindName("HideAfterCopyBox")).IsChecked = reset;
                     ((CheckBox)settings.FindName("TrayIconBox")).IsChecked = reset;
                     ((Button)settings.FindName("SaveButton")).RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
                 };
@@ -56,6 +58,9 @@ internal static class PanelBehaviorChecks
                     PanelPositionMode.ScreenRight => "屏幕右侧", _ => "记住位置"
                 };
                 check($"位置、激活及托盘开关保存生效且不显示任务栏：{label}", saved);
+                // 模拟复制成功回调，不操作系统剪贴板；验证设置保存后立即影响实际窗口可见性。
+                await panel.OnCopyCompletedAsync();
+                check($"复制后隐藏开关立即生效：{reset}", panel.IsVisible != reset);
                 NativeMethods.GetCursorPos(out var cursor);
                 panel.ShowPanel(); await IdleAsync(panel);
                 NativeMethods.GetWindowRect(hwnd, out var rect);

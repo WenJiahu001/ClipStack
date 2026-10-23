@@ -26,6 +26,7 @@ public partial class SettingsWindow : Window
         RightPosition.IsChecked = settings.WindowPosition == PanelPositionMode.ScreenRight;
         RememberPosition.IsChecked = settings.WindowPosition == PanelPositionMode.Remember || !Enum.IsDefined(settings.WindowPosition);
         ResetListBox.IsChecked = settings.ResetListOnActivate;
+        HideAfterCopyBox.IsChecked = settings.HideAfterCopy;
         TrayIconBox.IsChecked = settings.ShowTrayIcon;
         HotkeyBox.Text = settings.Hotkey; MaxEntriesBox.Text = settings.MaxEntries.ToString();
         RetentionBox.Text = settings.RetentionDays.ToString(); ImageBudgetBox.Text = settings.ImageBudgetMb.ToString();
@@ -68,6 +69,7 @@ public partial class SettingsWindow : Window
             Hotkey = HotkeyBox.Text.Trim(), MaxEntries = count, RetentionDays = days, ImageBudgetMb = budget,
             StartWithWindows = StartupBox.IsChecked == true,
             ResetListOnActivate = ResetListBox.IsChecked == true,
+            HideAfterCopy = HideAfterCopyBox.IsChecked == true,
             ShowTrayIcon = TrayIconBox.IsChecked == true,
             WindowPosition = MousePosition.IsChecked == true ? PanelPositionMode.FollowMouse
                 : CenterPosition.IsChecked == true ? PanelPositionMode.ScreenCenter
