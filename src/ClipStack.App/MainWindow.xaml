@@ -38,7 +38,7 @@
    </Grid>
    <DockPanel Grid.Row="2" Margin="{DynamicResource PanelFilterMargin}" VerticalAlignment="Center">
     <TextBlock DockPanel.Dock="Right" Text="{Binding ResultLabel}" Foreground="{StaticResource Muted}" FontSize="11" VerticalAlignment="Center" />
-    <StackPanel Orientation="Horizontal">
+    <StackPanel x:Name="FilterOptions" Orientation="Horizontal" ToolTip="左右方向键切换分类（搜索框为空时）">
      <RadioButton Content="全部" Style="{StaticResource NavButton}" GroupName="Filter" Tag="All" IsChecked="True" Checked="OnFilterChanged" />
      <RadioButton Content="文本" Style="{StaticResource NavButton}" GroupName="Filter" Tag="Text" Checked="OnFilterChanged" />
      <RadioButton Content="图片" Style="{StaticResource NavButton}" GroupName="Filter" Tag="Image" Checked="OnFilterChanged" />
@@ -78,7 +78,7 @@
        </StackPanel>
       </DockPanel>
       <controls:InlineNoteEditor Grid.Row="2" Value="{Binding Entry.Note, Mode=OneWay}" Label="{Binding NoteLabel}"
-       Visibility="{Binding FavoriteVisibility}" HorizontalAlignment="Right" Margin="{DynamicResource PanelNoteMargin}"
+       Visibility="{Binding FavoriteVisibility}" HorizontalAlignment="Left" Margin="{DynamicResource PanelNoteMargin}"
        Loaded="OnNoteEditorLoaded" EditingChanged="OnNoteEditingChanged" />
       <TextBlock Grid.Row="1" Text="{Binding Entry.Summary}" Visibility="{Binding TextVisibility}" TextTrimming="CharacterEllipsis" TextWrapping="Wrap" MaxHeight="{DynamicResource PanelTextHeight}" LineHeight="{DynamicResource PanelLineHeight}" />
       <StackPanel Grid.Row="1" Visibility="{Binding ImageVisibility}">

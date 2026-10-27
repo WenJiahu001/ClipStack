@@ -82,6 +82,27 @@ internal static class PanelChecks
             panel.UpdateLayout();
             var list = (ListBox)panel.FindName("HistoryList");
             var card = (ListBoxItem)list.ItemContainerGenerator.ContainerFromItem(favorite);
+            var searchBox = (TextBox)panel.FindName("SearchBox");
+            var filters = ((StackPanel)panel.FindName("FilterOptions")).Children.OfType<RadioButton>().ToArray();
+            bool rightSwitches = true;
+            foreach (HistoryFilter expected in new[] { HistoryFilter.Text, HistoryFilter.Image, HistoryFilter.Favorites, HistoryFilter.All })
+            {
+                KeyEventArgs key = SendKey(searchBox, Key.Right);
+                rightSwitches &= key.Handled && model.Filter == expected
+                    && filters.Single(option => option.IsChecked == true).Tag as string == expected.ToString();
+            }
+            Check("呼出后空搜索框右方向键循环切换四个分类并更新高亮", rightSwitches);
+            SendKey(searchBox, Key.Left);
+            Check("左方向键从全部循环到收藏", model.Filter == HistoryFilter.Favorites && filters[3].IsChecked == true);
+            SendKey(list, Key.Right);
+            Check("列表焦点下左右键也可切换分类", model.Filter == HistoryFilter.All && filters[0].IsChecked == true);
+            SendKey(filters[0], Key.Right);
+            Check("分类焦点下方向键不发生重复切换", model.Filter == HistoryFilter.Text && filters[1].IsChecked == true);
+            filters[0].IsChecked = true;
+            searchBox.Text = "搜索文字";
+            KeyEventArgs textArrow = SendKey(searchBox, Key.Right);
+            Check("搜索有文本时方向键保留编辑行为", !textArrow.Handled && model.Filter == HistoryFilter.All && searchBox.Text == "搜索文字");
+            searchBox.Clear();
             double standardHeight = card.ActualHeight;
             var bounds = new Rect(panel.Left, panel.Top, panel.ActualWidth, panel.ActualHeight);
             panel.ApplyDensity(DisplayDensity.Compact); panel.UpdateLayout();
@@ -149,6 +170,9 @@ internal static class PanelChecks
             Check("双击项内按钮不触发粘贴", uses.SequenceEqual(new[] { false }));
 
             var inline = Descendants<InlineNoteEditor>(panel).Single(control => control.DataContext == favorite);
+            Check("备注位于卡片左下角且显示按钮左对齐", inline.HorizontalAlignment == HorizontalAlignment.Left
+                && ((Button)inline.FindName("DisplayButton")).HorizontalAlignment == HorizontalAlignment.Left
+                && inline.TransformToAncestor(card).Transform(new Point()).X < card.ActualWidth / 2);
             var textBox = (TextBox)inline.FindName("Editor");
             int saves = 0;
             panel.SaveNoteAsync = async (id, note) =>
@@ -162,6 +186,8 @@ internal static class PanelChecks
             await Task.Delay(80);
             Check("原位编辑且没有新弹框", inline.IsEditing && textBox.IsVisible && Application.Current.Windows.Count == windows && model.IsEditingNote);
             textBox.Text = "工作常用回复 · 邮件确认";
+            KeyEventArgs noteArrow = SendKey(textBox, Key.Left);
+            Check("编辑备注时方向键不切换分类或提交草稿", !noteArrow.Handled && model.Filter == HistoryFilter.All && inline.IsEditing && saves == 0);
             SendKey(textBox, Key.Enter);
             await Task.Delay(80);
             Check("Enter 保存备注且不会粘贴", !inline.IsEditing && saves == 1 && store.Query("邮件确认").Single().Id == favoriteId && uses.Count == 1);
@@ -179,7 +205,7 @@ internal static class PanelChecks
             Check("输入框 Delete 不会删除历史", deletes == 0);
             textBox.Text = "移开焦点自动保存";
             ((TextBox)panel.FindName("SearchBox")).Focus();
-            await Task.Delay(100);
+            await WaitUntilAsync(() => !inline.IsEditing);
             Check("移开焦点保存备注", !inline.IsEditing && saves == 2 && store.Query("自动保存").Single().Id == favoriteId);
             noteButton.RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
             await Task.Delay(50);
@@ -313,11 +339,13 @@ internal static class PanelChecks
         while (!condition() && timeout.ElapsedMilliseconds < 2000) await Task.Delay(20);
     }
 
-    private static void SendKey(TextBox target, Key key)
+    private static KeyEventArgs SendKey(UIElement target, Key key)
     {
         target.Focus();
-        target.RaiseEvent(new KeyEventArgs(Keyboard.PrimaryDevice, PresentationSource.FromVisual(target), Environment.TickCount, key)
-        { RoutedEvent = Keyboard.PreviewKeyDownEvent });
+        var args = new KeyEventArgs(Keyboard.PrimaryDevice, PresentationSource.FromVisual(target), Environment.TickCount, key)
+        { RoutedEvent = Keyboard.PreviewKeyDownEvent };
+        target.RaiseEvent(args);
+        return args;
     }
 
     private static IEnumerable<T> Descendants<T>(DependencyObject parent) where T : DependencyObject

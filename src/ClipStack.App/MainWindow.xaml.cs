@@ -248,10 +248,27 @@ public partial class MainWindow : Window
             request();
         }
     }
+    private bool TrySwitchFilter(Key key)
+    {
+        // 呼出后焦点位于空搜索框，允许立即切换；有文本时保留光标移动和选择。
+        if (Model.IsEditingNote || Keyboard.FocusedElement is TextBoxBase textBox
+            && (textBox != SearchBox || SearchBox.Text.Length > 0)) return false;
+        RadioButton[] options = FilterOptions.Children.OfType<RadioButton>().ToArray();
+        if (options.Length == 0) return false;
+        int current = Array.FindIndex(options, option => option.Tag as string == Model.Filter.ToString());
+        if (current < 0) current = 0;
+        int next = (current + (key == Key.Right ? 1 : -1) + options.Length) % options.Length;
+        // 复用鼠标点击的 Checked 流程，保持分类高亮与异步查询一致。
+        options[next].IsChecked = true;
+        return true;
+    }
+
     private async void OnPreviewKeyDown(object sender, KeyEventArgs e)
     {
         // 备注框保留文字编辑的全部按键，由控件处理 Enter / Esc。
         if (Model.IsEditingNote && Keyboard.FocusedElement is TextBox edit && edit != SearchBox) return;
+        if ((e.Key == Key.Left || e.Key == Key.Right) && Keyboard.Modifiers == ModifierKeys.None && TrySwitchFilter(e.Key))
+        { e.Handled = true; return; }
         if (e.Key == Key.Escape) { e.Handled = true; await TryHideAsync(); return; }
         if (e.Key == Key.Space && Keyboard.Modifiers == ModifierKeys.None && HistoryList.IsKeyboardFocusWithin)
         { OnPreview(sender, e); e.Handled = true; return; }
