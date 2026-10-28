@@ -70,7 +70,8 @@
         <Setter.Value>
           <ControlTemplate TargetType="TextBox">
             <Border x:Name="Body" CornerRadius="7" Background="{TemplateBinding Background}" BorderBrush="{TemplateBinding BorderBrush}" BorderThickness="1">
-              <ScrollViewer x:Name="PART_ContentHost" Margin="{TemplateBinding Padding}" />
+              <!-- WPF 会将 TextBox.Padding 传给内容宿主，不再叠加同值外边距。 -->
+              <ScrollViewer x:Name="PART_ContentHost" />
             </Border>
             <ControlTemplate.Triggers>
               <Trigger Property="IsKeyboardFocused" Value="True"><Setter TargetName="Body" Property="BorderBrush" Value="#2563EB" /></Trigger>

@@ -83,6 +83,19 @@ internal static class PanelChecks
             var list = (ListBox)panel.FindName("HistoryList");
             var card = (ListBoxItem)list.ItemContainerGenerator.ContainerFromItem(favorite);
             var searchBox = (TextBox)panel.FindName("SearchBox");
+            foreach (DisplayDensity density in Enum.GetValues<DisplayDensity>())
+            {
+                panel.ApplyDensity(density);
+                searchBox.Clear(); panel.UpdateLayout();
+                Rect emptyCaret = searchBox.GetRectFromCharacterIndex(0);
+                searchBox.Text = "搜索文字 abc"; panel.UpdateLayout();
+                Rect textStart = searchBox.GetRectFromCharacterIndex(0);
+                // 检查实际排版坐标，避免占位文字靠左而真正的输入区域偏到右侧。
+                double expectedLeft = searchBox.BorderThickness.Left + searchBox.Padding.Left;
+                Check($"搜索光标与输入文字从左侧开始：{density}", !emptyCaret.IsEmpty && !textStart.IsEmpty
+                    && Math.Abs(emptyCaret.Left - expectedLeft) <= 3 && Math.Abs(textStart.Left - expectedLeft) <= 3);
+            }
+            searchBox.Clear(); panel.ApplyDensity(DisplayDensity.Standard); panel.UpdateLayout();
             var filters = ((StackPanel)panel.FindName("FilterOptions")).Children.OfType<RadioButton>().ToArray();
             bool rightSwitches = true;
             foreach (HistoryFilter expected in new[] { HistoryFilter.Text, HistoryFilter.Image, HistoryFilter.Favorites, HistoryFilter.All })
