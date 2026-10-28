@@ -47,5 +47,10 @@ internal sealed class HotkeyManager : IDisposable
         return modifiers != 0 && key != 0;
     }
 
-    public void Dispose() { NativeMethods.UnregisterHotKey(hwnd, 1); NativeMethods.UnregisterHotKey(hwnd, 2); }
+    internal void Unregister()
+    {
+        NativeMethods.UnregisterHotKey(hwnd, 1); NativeMethods.UnregisterHotKey(hwnd, 2);
+        ActiveHotkey = "未注册";
+    }
+    public void Dispose() => Unregister();
 }

@@ -16,7 +16,8 @@ internal static class Program
     private static int passed, failed;
     private static async Task<int> Main(string[] args)
     {
-        if (args.Length == 2 && args[0] == "--performance-report") return PerformanceBenchmarks.Run(args[1]);
+        if (args.Length is 2 or 3 && args[0] == "--performance-report")
+            return PerformanceBenchmarks.Run(args[1], args.Length == 3 ? int.Parse(args[2]) : 1000);
         Run("中文、表情、空白及换行完整保存", TextRoundTrip);
         Run("使用与重复复制均置顶、去重并保留收藏备注", Deduplication);
         Run("同内容的不同类型分别保存", SeparateKinds);
@@ -46,6 +47,10 @@ internal static class Program
         Run("配置规范化、保存及损坏恢复", SettingsRecovery);
         Run("来源进程含点名称保留完整进程名", DottedProcessName);
         Run("缺失图片文件不会删除历史记录", MissingImage);
+        Run("同毫秒与时钟回拨时新记录和重复记录均置顶", MonotonicOrder);
+        Run("重复复制修复损坏正文和丢失图片并保留备注", RepairDuplicates);
+        Run("完整备份恢复包含图片密钥配置及校验", CompleteBackup);
+        Run("分批查询与全量查询顺序一致", QueryPages);
         await RunAsync("多线程并发保存、读取及去重", ConcurrentWrites);
         Console.WriteLine($"\n通过 {passed} 项，失败 {failed} 项。");
         return failed == 0 ? 0 : 1;
@@ -93,7 +98,7 @@ internal static class Program
         Assert(repeated.Id == a.Id && context.Store.GetStatistics().Count == 2);
         ClipEntry first = context.Store.Query()[0];
         Assert(first.Id == a.Id && first.Favorite && first.Note == "常用内容" && first.CreatedAt == createdAt);
-        Assert(first.CopiedAt > context.Store.Query()[1].CopiedAt && first.UsedAt != null);
+        Assert(first.CopiedAt.ToUnixTimeMilliseconds() == time.ToUnixTimeMilliseconds() && first.UsedAt != null);
         context.Store.MarkUsed(b.Id!);
         Assert(context.Store.Query()[0].Id == b.Id);
         context.Store.MarkUsed("已删除记录");
@@ -264,7 +269,7 @@ internal static class Program
         DateTimeOffset copied = context.Store.Query().Single().CopiedAt;
         context.Store.Dispose();
         // 恢复为真实的 v1 表结构，再走生产迁移入口。
-        Sql(context.Paths.Database, "ALTER TABLE clips DROP COLUMN note_payload; PRAGMA user_version=1;");
+        Sql(context.Paths.Database, "DROP INDEX ix_clips_sort; ALTER TABLE clips DROP COLUMN sort_order; ALTER TABLE clips DROP COLUMN note_payload; PRAGMA user_version=1;");
         using (var migrated = new HistoryStore(context.Paths, new AppSettings()))
         {
             ClipEntry entry = migrated.Query().Single();
@@ -272,7 +277,7 @@ internal static class Program
             Assert(Encoding.UTF8.GetString(migrated.ReadContent(entry)) == "旧版历史");
             migrated.SetNote(id, "升级后的备注");
         }
-        string backup = Directory.GetFiles(context.Paths.Backups, "*.db").Single();
+        string backup = Directory.GetFiles(context.Paths.Backups, "history.db", SearchOption.AllDirectories).Single();
         using (var connection = new SqliteConnection($"Data Source={backup};Pooling=False"))
         {
             connection.Open(); using var command = connection.CreateCommand();
@@ -283,7 +288,7 @@ internal static class Program
         }
         using var reopened = new HistoryStore(context.Paths, new AppSettings());
         Assert(reopened.Query().Single().Note == "升级后的备注");
-        Assert(Directory.GetFiles(context.Paths.Backups, "*.db").Length == 1);
+        Assert(Directory.GetFiles(context.Paths.Backups, "history.db", SearchOption.AllDirectories).Length == 1);
     }
     private static void PanelPosition()
     {
@@ -440,13 +445,13 @@ internal static class Program
         Assert((normalized with { MainWindowDensity = (DisplayDensity)99 }).Normalize().MainWindowDensity == DisplayDensity.Standard);
         foreach (PanelPositionMode mode in Enum.GetValues<PanelPositionMode>())
         {
-            context.Paths.SaveSettings(normalized with { WindowPosition = mode, ResetListOnActivate = false, ShowTrayIcon = false, HideAfterCopy = false });
-            Assert(context.Paths.LoadSettings() is { ResetListOnActivate: false, ShowTrayIcon: false, HideAfterCopy: false } loaded && loaded.WindowPosition == mode);
+            context.Paths.SaveSettings(normalized with { WindowPosition = mode, ResetListOnActivate = false, ResetFilterOnShow = false, ShowTrayIcon = false, HideAfterCopy = false });
+            Assert(context.Paths.LoadSettings() is { ResetListOnActivate: false, ResetFilterOnShow: false, ShowTrayIcon: false, HideAfterCopy: false } loaded && loaded.WindowPosition == mode);
         }
         Assert((normalized with { WindowPosition = (PanelPositionMode)99 }).Normalize().WindowPosition == PanelPositionMode.Remember);
         File.WriteAllText(context.Paths.Settings, "{\"MaxEntries\":250,\"ShowTaskbarIcon\":false}");
         Assert(context.Paths.LoadSettings() is { MaxEntries: 250, MainWindowDensity: DisplayDensity.Standard,
-            WindowPosition: PanelPositionMode.Remember, ResetListOnActivate: true, ShowTrayIcon: true, HideAfterCopy: true });
+            WindowPosition: PanelPositionMode.Remember, ResetListOnActivate: true, ResetFilterOnShow: true, ShowTrayIcon: true, HideAfterCopy: true });
         File.WriteAllText(context.Paths.Settings, "{invalid-json");
         Assert(context.Paths.LoadSettings().MaxEntries == 1000);
         Assert(Directory.GetFiles(context.Paths.Root, "settings.json.invalid-*").Length == 1);
@@ -461,6 +466,61 @@ internal static class Program
     {
         var settings = new AppSettings { ExcludedProcesses = new[] { "My.Company.App.exe", "my.company.app" } }.Normalize();
         Assert(settings.ExcludedProcesses.SequenceEqual(new[] { "my.company.app" }));
+    }
+    private static void MonotonicOrder()
+    {
+        using var context = new Context();
+        DateTimeOffset now = DateTimeOffset.UtcNow;
+        string first = context.Store.Save(CapturedClip.FromText("先复制"), now).Id!;
+        string second = context.Store.Save(CapturedClip.FromText("同毫秒新内容"), now).Id!;
+        Assert(context.Store.Query()[0].Id == second);
+        context.Store.Save(CapturedClip.FromText("先复制"), now.AddHours(-1));
+        Assert(context.Store.Query()[0].Id == first && context.Store.Query()[0].CopiedAt.ToUnixTimeMilliseconds() == now.AddHours(-1).ToUnixTimeMilliseconds());
+        string third = context.Store.Save(CapturedClip.FromText("回拨后新内容"), now.AddHours(-1)).Id!;
+        Assert(context.Store.Query()[0].Id == third);
+    }
+    private static void RepairDuplicates()
+    {
+        using var context = new Context();
+        string id = context.Store.Save(CapturedClip.FromText("可修复正文")).Id!;
+        context.Store.SetFavorite(id, true); context.Store.SetNote(id, "保留备注");
+        Sql(context.Paths.Database, "UPDATE clips SET text_payload=X'010203' WHERE kind=1;");
+        Assert(context.Store.Save(CapturedClip.FromText("可修复正文")).Id == id);
+        ClipEntry text = context.Store.Query().Single();
+        Assert(!text.Unreadable && text.Note == "保留备注" && Encoding.UTF8.GetString(context.Store.ReadContent(text)) == "可修复正文");
+        string imageId = context.Store.Save(Image()).Id!;
+        ClipEntry image = context.Store.Query().First(entry => entry.Id == imageId);
+        File.Delete(context.Paths.ImagePath(image.ImageFile!)); File.Delete(context.Paths.ImagePath(image.ThumbnailFile!));
+        Assert(context.Store.Save(Image()).Id == imageId && context.Store.GetStatistics().Count == 2);
+        Assert(context.Store.ReadContent(image).SequenceEqual(Image().Content));
+        Assert(context.Store.ReadContent(image, true).SequenceEqual(Image().Thumbnail!));
+    }
+    private static void CompleteBackup()
+    {
+        using var context = new Context();
+        context.Store.UpdateSettings(new AppSettings { HideAfterCopy = false });
+        context.Store.Save(Image());
+        string id = context.Store.Save(CapturedClip.FromText("完整备份")).Id!;
+        context.Store.SetFavorite(id, true); context.Store.SetNote(id, "备份备注");
+        string backup = context.Store.CreateBackup();
+        context.Store.Clear(true);
+        string restored = Path.Combine(context.Paths.Root, "restored");
+        HistoryBackup.Restore(backup, restored);
+        var restoredPaths = new AppPaths(restored);
+        using var reopened = new HistoryStore(restoredPaths, restoredPaths.LoadSettings());
+        Assert(reopened.Query().Count == 2 && reopened.Query().Single(entry => entry.Id == id).Note == "备份备注");
+        Assert(!reopened.Settings.HideAfterCopy && reopened.ReadContent(reopened.Query(filter: HistoryFilter.Image).Single()).SequenceEqual(Image().Content));
+        File.AppendAllText(Path.Combine(backup, "settings.json"), "corrupted");
+        Throws<InvalidDataException>(() => HistoryBackup.Restore(backup, Path.Combine(context.Paths.Root, "invalid-restore")));
+        Assert(!Directory.Exists(Path.Combine(context.Paths.Root, "invalid-restore")));
+    }
+    private static void QueryPages()
+    {
+        using var context = new Context();
+        for (int i = 0; i < 220; i++) context.Store.Save(CapturedClip.FromText("分页内容" + i));
+        var all = context.Store.Query();
+        Assert(context.Store.Query(limit: 100).Select(entry => entry.Id).SequenceEqual(all.Take(100).Select(entry => entry.Id)));
+        Assert(context.Store.Query("分页内容", limit: 201).Count == 201);
     }
     private static async Task ConcurrentWrites()
     {

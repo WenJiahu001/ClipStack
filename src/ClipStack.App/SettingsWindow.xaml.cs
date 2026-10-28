@@ -6,6 +6,7 @@ using System.IO;
 using System.Linq;
 using System.Text;
 using System.Windows.Controls;
+using System.ComponentModel;
 using ClipStack.App.Platform;
 using ClipStack.Core;
 
@@ -15,9 +16,11 @@ public partial class SettingsWindow : Window
 {
     private readonly AppSettings original;
     private readonly Func<AppSettings, Task<string?>> save;
+    private bool saving;
     internal SettingsWindow(AppSettings settings, string dataPath, Func<AppSettings, Task<string?>> save)
     {
         InitializeComponent(); this.original = settings; this.save = save;
+        Closing += OnClosing;
         CompactDensity.IsChecked = settings.MainWindowDensity == DisplayDensity.Compact;
         ComfortableDensity.IsChecked = settings.MainWindowDensity == DisplayDensity.Comfortable;
         StandardDensity.IsChecked = !CompactDensity.IsChecked.Value && !ComfortableDensity.IsChecked.Value;
@@ -26,6 +29,7 @@ public partial class SettingsWindow : Window
         RightPosition.IsChecked = settings.WindowPosition == PanelPositionMode.ScreenRight;
         RememberPosition.IsChecked = settings.WindowPosition == PanelPositionMode.Remember || !Enum.IsDefined(settings.WindowPosition);
         ResetListBox.IsChecked = settings.ResetListOnActivate;
+        ResetFilterBox.IsChecked = settings.ResetFilterOnShow;
         HideAfterCopyBox.IsChecked = settings.HideAfterCopy;
         TrayIconBox.IsChecked = settings.ShowTrayIcon;
         HotkeyBox.Text = settings.Hotkey; MaxEntriesBox.Text = settings.MaxEntries.ToString();
@@ -41,6 +45,7 @@ public partial class SettingsWindow : Window
         };
     }
     private void OnCancel(object sender, RoutedEventArgs e) => Close();
+    private void OnClosing(object? sender, CancelEventArgs e) { if (saving) e.Cancel = true; }
     private void OnLicenses(object sender, RoutedEventArgs e)
     {
         var text = new StringBuilder();
@@ -58,6 +63,7 @@ public partial class SettingsWindow : Window
     }
     private async void OnSave(object sender, RoutedEventArgs e)
     {
+        if (saving) return;
         if (!int.TryParse(MaxEntriesBox.Text, out int count) || count < 10 || count > 10000
             || !int.TryParse(RetentionBox.Text, out int days) || days < 1 || days > 365
             || !int.TryParse(ImageBudgetBox.Text, out int budget) || budget < 20 || budget > 5000)
@@ -69,6 +75,7 @@ public partial class SettingsWindow : Window
             Hotkey = HotkeyBox.Text.Trim(), MaxEntries = count, RetentionDays = days, ImageBudgetMb = budget,
             StartWithWindows = StartupBox.IsChecked == true,
             ResetListOnActivate = ResetListBox.IsChecked == true,
+            ResetFilterOnShow = ResetFilterBox.IsChecked == true,
             HideAfterCopy = HideAfterCopyBox.IsChecked == true,
             ShowTrayIcon = TrayIconBox.IsChecked == true,
             WindowPosition = MousePosition.IsChecked == true ? PanelPositionMode.FollowMouse
@@ -78,13 +85,14 @@ public partial class SettingsWindow : Window
                 : ComfortableDensity.IsChecked == true ? DisplayDensity.Comfortable : DisplayDensity.Standard,
             ExcludedProcesses = ExcludedBox.Text.Split(new[] { '\r', '\n', ';', ',', '；', '，' }, StringSplitOptions.RemoveEmptyEntries)
         };
-        SaveButton.IsEnabled = false;
+        saving = true; IsEnabled = false;
         try
         {
             string? error = await save(next.Normalize());
             if (error != null) ErrorText.Text = error;
-            else { DialogResult = true; Close(); }
+            else { saving = false; DialogResult = true; }
         }
-        finally { SaveButton.IsEnabled = true; }
+        catch (Exception) { ErrorText.Text = "保存未完成，请稍后重试。"; }
+        finally { saving = false; IsEnabled = true; }
     }
 }

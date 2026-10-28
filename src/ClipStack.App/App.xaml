@@ -6,13 +6,25 @@
     <Style TargetType="ScrollBar">
       <Setter Property="Width" Value="7" />
       <Setter Property="MinWidth" Value="7" />
+      <Setter Property="Height" Value="Auto" />
       <Setter Property="Template"><Setter.Value><ControlTemplate TargetType="ScrollBar">
-        <Grid Background="Transparent"><Track x:Name="PART_Track" IsDirectionReversed="True">
-          <Track.DecreaseRepeatButton><RepeatButton Command="ScrollBar.PageUpCommand" Focusable="False"><RepeatButton.Template><ControlTemplate TargetType="RepeatButton"><Border Background="Transparent" /></ControlTemplate></RepeatButton.Template></RepeatButton></Track.DecreaseRepeatButton>
-          <Track.Thumb><Thumb MinHeight="28" Margin="1,0"><Thumb.Template><ControlTemplate TargetType="Thumb"><Border CornerRadius="3" Background="#C5CBD4" /></ControlTemplate></Thumb.Template></Thumb></Track.Thumb>
-          <Track.IncreaseRepeatButton><RepeatButton Command="ScrollBar.PageDownCommand" Focusable="False"><RepeatButton.Template><ControlTemplate TargetType="RepeatButton"><Border Background="Transparent" /></ControlTemplate></RepeatButton.Template></RepeatButton></Track.IncreaseRepeatButton>
+        <Grid Background="Transparent"><Track x:Name="PART_Track" Orientation="{TemplateBinding Orientation}" IsDirectionReversed="True">
+          <Track.DecreaseRepeatButton><RepeatButton x:Name="Decrease" Command="ScrollBar.PageUpCommand" Focusable="False"><RepeatButton.Template><ControlTemplate TargetType="RepeatButton"><Border Background="Transparent" /></ControlTemplate></RepeatButton.Template></RepeatButton></Track.DecreaseRepeatButton>
+          <Track.Thumb><Thumb x:Name="Handle" MinHeight="28" Margin="1,0"><Thumb.Template><ControlTemplate TargetType="Thumb"><Border CornerRadius="3" Background="#C5CBD4" /></ControlTemplate></Thumb.Template></Thumb></Track.Thumb>
+          <Track.IncreaseRepeatButton><RepeatButton x:Name="Increase" Command="ScrollBar.PageDownCommand" Focusable="False"><RepeatButton.Template><ControlTemplate TargetType="RepeatButton"><Border Background="Transparent" /></ControlTemplate></RepeatButton.Template></RepeatButton></Track.IncreaseRepeatButton>
         </Track></Grid>
+        <ControlTemplate.Triggers>
+          <Trigger Property="Orientation" Value="Horizontal">
+            <Setter TargetName="PART_Track" Property="IsDirectionReversed" Value="False" />
+            <Setter TargetName="Decrease" Property="Command" Value="ScrollBar.PageLeftCommand" />
+            <Setter TargetName="Increase" Property="Command" Value="ScrollBar.PageRightCommand" />
+            <Setter TargetName="Handle" Property="MinHeight" Value="0" /><Setter TargetName="Handle" Property="MinWidth" Value="28" /><Setter TargetName="Handle" Property="Margin" Value="0,1" />
+          </Trigger>
+        </ControlTemplate.Triggers>
       </ControlTemplate></Setter.Value></Setter>
+      <Style.Triggers>
+        <Trigger Property="Orientation" Value="Horizontal"><Setter Property="Width" Value="Auto" /><Setter Property="MinWidth" Value="0" /><Setter Property="Height" Value="7" /></Trigger>
+      </Style.Triggers>
     </Style>
     <SolidColorBrush x:Key="Canvas" Color="#FAFBFC" />
     <SolidColorBrush x:Key="Surface" Color="#FFFFFF" />

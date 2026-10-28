@@ -17,9 +17,7 @@ internal static class PasteService
         if (entry.Kind == ClipKind.Text) data.SetText(Encoding.UTF8.GetString(content), System.Windows.TextDataFormat.UnicodeText);
         else
         {
-            using var stream = new MemoryStream(content, false);
-            var bitmap = new BitmapImage(); bitmap.BeginInit(); bitmap.CacheOption = BitmapCacheOption.OnLoad;
-            bitmap.StreamSource = stream; bitmap.EndInit(); bitmap.Freeze();
+            var bitmap = await BitmapCodec.ProcessAsync(() => BitmapCodec.Decode(content));
             data.SetImage(bitmap);
             // PNG 额外保留透明通道；DIB 兼容只接受位图的目标程序。
             data.SetData("PNG", new MemoryStream(content, false));
@@ -37,17 +35,25 @@ internal static class PasteService
         }
     }
 
-    public static async Task<bool> TryPasteAsync(IntPtr target, Action<string>? diagnostic = null)
+    public static async Task<bool> TryPasteAsync(IntPtr target, Action<string>? diagnostic = null, uint? expectedSequence = null)
     {
         bool Failed(string reason) { diagnostic?.Invoke(reason); return false; }
         if (target == IntPtr.Zero || !NativeMethods.IsWindow(target)) return Failed("目标窗口不存在");
         NativeMethods.GetWindowThreadProcessId(target, out uint process);
         if (process == (uint)Environment.ProcessId) return Failed("目标为当前进程");
-        if (NativeMethods.GetForegroundWindow() != target && !NativeMethods.SetForegroundWindow(target)) return Failed("系统拒绝激活目标窗口");
+        bool activated = NativeMethods.GetForegroundWindow() == target;
+        if (!activated && !NativeMethods.SetForegroundWindow(target)) return Failed("系统拒绝激活目标窗口");
         for (int attempt = 0; attempt < 20; attempt++)
         {
             await Task.Delay(25);
-            if (NativeMethods.GetForegroundWindow() != target) return Failed("目标窗口失去前台焦点");
+            if (expectedSequence.HasValue && NativeMethods.GetClipboardSequenceNumber() != expectedSequence.Value)
+                return Failed("系统剪贴板已被其他复制操作更新");
+            if (NativeMethods.GetForegroundWindow() != target)
+            {
+                if (activated) return Failed("目标窗口失去前台焦点");
+                continue;
+            }
+            activated = true;
             bool modifierDown = false;
             foreach (int key in new[] { 0x10, 0x11, 0x12, 0x5B, 0x5C })
                 modifierDown |= (NativeMethods.GetAsyncKeyState(key) & 0x8000) != 0;

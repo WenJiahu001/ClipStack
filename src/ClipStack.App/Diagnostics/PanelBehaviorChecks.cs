@@ -34,6 +34,7 @@ internal static class PanelBehaviorChecks
                     tray.SetVisible(next.ShowTrayIcon);
                     AppSettings loaded = new AppPaths(paths.Root).LoadSettings();
                     saved = loaded.WindowPosition == mode && loaded.ResetListOnActivate == reset
+                        && loaded.ResetFilterOnShow == reset
                         && loaded.ShowTrayIcon == reset && loaded.HideAfterCopy == reset
                         && tray.IsVisible == reset && !panel.ShowInTaskbar && panel.IsVisible;
                     return Task.FromResult<string?>(null);
@@ -47,6 +48,7 @@ internal static class PanelBehaviorChecks
                     };
                     ((RadioButton)settings.FindName(option)).IsChecked = true;
                     ((CheckBox)settings.FindName("ResetListBox")).IsChecked = reset;
+                    ((CheckBox)settings.FindName("ResetFilterBox")).IsChecked = reset;
                     ((CheckBox)settings.FindName("HideAfterCopyBox")).IsChecked = reset;
                     ((CheckBox)settings.FindName("TrayIconBox")).IsChecked = reset;
                     ((Button)settings.FindName("SaveButton")).RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
@@ -57,7 +59,7 @@ internal static class PanelBehaviorChecks
                     PanelPositionMode.FollowMouse => "跟随鼠标", PanelPositionMode.ScreenCenter => "屏幕中间",
                     PanelPositionMode.ScreenRight => "屏幕右侧", _ => "记住位置"
                 };
-                check($"位置、激活及托盘开关保存生效且不显示任务栏：{label}", saved);
+                check($"位置、激活、呼出分类及托盘开关保存生效且不显示任务栏：{label}", saved);
                 // 模拟复制成功回调，不操作系统剪贴板；验证设置保存后立即影响实际窗口可见性。
                 await panel.OnCopyCompletedAsync();
                 check($"复制后隐藏开关立即生效：{reset}", panel.IsVisible != reset);
@@ -91,6 +93,28 @@ internal static class PanelBehaviorChecks
             // 使用真实虚拟化列表和异步查询，确保查询完成后仍选中最新首条。
             using var history = new HistoryController(store, paths, model, panel);
             for (int i = 0; i < 80; i++) store.Save(CapturedClip.FromText($"行为配置测试 {i:D2}"));
+            var filters = ((StackPanel)panel.FindName("FilterOptions")).Children.OfType<RadioButton>().ToArray();
+            panel.PreviewMode = true; panel.KeepOpen = false;
+            model.QueryText = "行为配置测试";
+            foreach (bool enabled in new[] { true, false })
+            {
+                // 与列表重置使用相反开关，验证两个配置彼此独立。
+                panel.ApplySettings(defaults with { ResetFilterOnShow = enabled, ResetListOnActivate = !enabled });
+                foreach (HistoryFilter previous in new[] { HistoryFilter.Text, HistoryFilter.Image, HistoryFilter.Favorites })
+                {
+                    filters.Single(option => option.Tag as string == previous.ToString()).IsChecked = true;
+                    await history.RefreshAsync();
+                    panel.Hide(); panel.ShowPanel();
+                    await history.RefreshAsync(); await IdleAsync(panel);
+                    HistoryFilter expected = enabled ? HistoryFilter.All : previous;
+                    check($"呼出分类重置为 {enabled} 时从 {previous} 切换，独立于列表重置且保留搜索",
+                        model.Filter == expected && filters.Single(option => option.IsChecked == true).Tag as string == expected.ToString()
+                        && model.QueryText == "行为配置测试" && model.ResultsCurrent
+                        && model.Items.Count == store.Query(model.QueryText, expected).Count);
+                }
+            }
+            panel.ApplySettings(defaults with { ResetFilterOnShow = false });
+            filters.Single(option => option.Tag as string == nameof(HistoryFilter.Text)).IsChecked = true;
             model.QueryText = "行为配置测试"; model.Filter = HistoryFilter.Text;
             await history.RefreshAsync();
             panel.PreviewMode = true; panel.KeepOpen = false;
@@ -106,7 +130,7 @@ internal static class PanelBehaviorChecks
             check("默认激活回到顶部且选中异步加载的首条", model.SelectedItem?.Id == newest && scroll.VerticalOffset == 0);
             check("激活重置保留当前搜索与分类", model.QueryText == "行为配置测试" && model.Filter == HistoryFilter.Text);
 
-            panel.ApplySettings(defaults with { ResetListOnActivate = false });
+            panel.ApplySettings(defaults with { ResetListOnActivate = false, ResetFilterOnShow = false });
             model.SelectedItem = model.Items.Last(); string selected = model.SelectedItem.Id;
             list.ScrollIntoView(model.SelectedItem); await IdleAsync(panel);
             double offset = scroll.VerticalOffset;
@@ -115,8 +139,13 @@ internal static class PanelBehaviorChecks
 
             panel.ApplySettings(defaults); model.IsEditingNote = true;
             panel.ShowPanel(); await history.RefreshAsync(); await IdleAsync(panel);
-            check("备注编辑期间激活不打断当前选择", model.SelectedItem?.Id == selected && model.IsEditingNote && scroll.VerticalOffset > 0);
+            check("备注编辑期间呼出不重置分类或打断当前选择", model.SelectedItem?.Id == selected && model.IsEditingNote
+                && model.Filter == HistoryFilter.Text && scroll.VerticalOffset > 0);
             model.IsEditingNote = false;
+            panel.KeepOpen = true;
+            panel.ShowPanel(); await history.RefreshAsync(); await IdleAsync(panel);
+            check("所属弹窗占用时呼出不重置分类", model.Filter == HistoryFilter.Text && filters[1].IsChecked == true);
+            panel.KeepOpen = false;
             model.QueryText = "没有匹配的行为配置测试条目";
             panel.ShowPanel(); await history.RefreshAsync(); await IdleAsync(panel);
             check("空列表激活安全且没有选中项", model.Items.Count == 0 && model.SelectedItem == null);

@@ -260,6 +260,7 @@ internal static class PanelChecks
             await CaptureFloatingSceneAsync(panel, Path.Combine(Path.GetDirectoryName(Path.GetFullPath(outputPath))!, "floating-panel.png"));
 
             await PanelBehaviorChecks.RunAsync(panel, store, paths, Check);
+            await ReliabilityChecks.RunAsync(paths, Check);
 
             using (var history = new HistoryController(store, paths, model, panel))
             {

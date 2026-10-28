@@ -16,9 +16,10 @@ internal static class DiagnosticRunner
     internal static async Task<int> RunAsync(StartupOptions options, HistoryStore store, AppPaths paths)
     {
         if (options.Smoke != null) { await SmokeChecks.RunAsync(options.Smoke, store, paths); return 0; }
-        if (options.Integration != null) return await IntegrationChecks.RunAsync(options.Integration, store, paths) ? 0 : 1;
+        if (options.Integration != null) return await IntegrationChecks.RunAsync(options.Integration, store, paths, options.InteractiveIntegration) ? 0 : 1;
         if (options.PanelTest != null) return await PanelChecks.RunAsync(options.PanelTest, store, paths) ? 0 : 1;
         if (options.PerformanceTest != null) return await PerformanceChecks.RunAsync(options.PerformanceTest, store, paths) ? 0 : 1;
+        if (options.Soak != null) return await SoakChecks.RunAsync(options.Soak, options.SoakSeconds, store, paths) ? 0 : 1;
         await RenderPreviewAsync(options, store, paths); return 0;
     }
 

@@ -19,7 +19,7 @@ namespace ClipStack.App.Diagnostics;
 internal static class IntegrationChecks
 {
     // 仅显式诊断入口使用；复制原数据到内存，所有检查结束后恢复，不输出正文。
-    public static async Task<bool> RunAsync(string reportPath, HistoryStore store, AppPaths paths)
+    public static async Task<bool> RunAsync(string reportPath, HistoryStore store, AppPaths paths, bool interactive = false)
     {
         var checks = new List<object>();
         bool success = true, restored = false, clipboardModified = false;
@@ -112,8 +112,22 @@ internal static class IntegrationChecks
             File.Delete(readyFile);
             var start = new ProcessStartInfo(Environment.ProcessPath!) { UseShellExecute = false };
             start.ArgumentList.Add("--paste-target"); start.ArgumentList.Add(targetReport);
+            // 建立真实的前台调用方，再通过 Windows 公共 API 向子进程交接焦点权限。
+            var foreground = new Window { Width = 320, Height = 100, Title = "ClipStack 系统粘贴检查", ShowInTaskbar = false };
+            if (interactive)
+            {
+                var proceed = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+                var button = new System.Windows.Controls.Button { Content = "开始验证自动粘贴", Margin = new Thickness(12) };
+                button.Click += (_, _) => proceed.TrySetResult(); foreground.Content = button;
+                // 启动器可能指定 SW_HIDE；首次 Show 消耗该参数，再显式显示交互窗口。
+                foreground.Show(); foreground.Hide(); foreground.Show();
+                if (await Task.WhenAny(proceed.Task, Task.Delay(120000)) != proceed.Task)
+                { foreground.Close(); throw new TimeoutException("等待粘贴检查交互超时。"); }
+            }
+            foreground.Show(); foreground.Activate();
             using (Process target = Process.Start(start) ?? throw new InvalidOperationException("无法启动粘贴测试窗口。"))
             {
+                NativeMethods.AllowSetForegroundWindow((uint)target.Id);
                 try
                 {
                     IntPtr handle = IntPtr.Zero;
@@ -143,11 +157,36 @@ internal static class IntegrationChecks
                 {
                     if (!target.HasExited) { target.Kill(); await target.WaitForExitAsync(); }
                     File.Delete(readyFile);
+                    foreground.Close();
                 }
             }
 
-            using (var firstInstance = new SingleInstance())
-            using (var secondInstance = new SingleInstance())
+            // 固定在后台图像槽等待，验证退出等待的是完整采集任务而非仅保存队列。
+            var imageSlotEntered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+            var releaseImageSlot = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+            Task heldImageSlot = BitmapCodec.ProcessAsync(() =>
+            {
+                imageSlotEntered.TrySetResult(); releaseImageSlot.Task.GetAwaiter().GetResult(); return true;
+            });
+            await imageSlotEntered.Task;
+            int beforeStop = captured;
+            try
+            {
+                var pendingImage = new System.Windows.DataObject();
+                pendingImage.SetData("PNG", new MemoryStream(image.Content, false));
+                System.Windows.Clipboard.SetDataObject(pendingImage, true);
+                await WaitAsync(() => monitor.PendingCaptureCount > 0);
+                Task stopping = monitor.StopAsync();
+                Check("退出等待尚未完成的图片处理", monitor.PendingCaptureCount > 0 && !stopping.IsCompleted);
+                releaseImageSlot.TrySetResult();
+                await heldImageSlot; await stopping;
+                Check("退出等待完成后最后的图片已交付保存", captured >= beforeStop + 1 && monitor.PendingCaptureCount == 0);
+            }
+            finally { releaseImageSlot.TrySetResult(); await heldImageSlot; }
+
+            string instanceScope = "diagnostic-" + Guid.NewGuid().ToString("N");
+            using (var firstInstance = new SingleInstance(instanceScope))
+            using (var secondInstance = new SingleInstance(instanceScope))
             {
                 Check("单实例互斥", firstInstance.IsPrimary && !secondInstance.IsPrimary);
                 var activated = new TaskCompletionSource<bool>();

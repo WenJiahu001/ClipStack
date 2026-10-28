@@ -10,7 +10,8 @@ namespace ClipStack.App.Services;
 internal sealed class ClipboardCaptureWorker
 {
     private const long ByteBudget = 32 * 1024 * 1024;
-    private readonly Channel<CapturedClip> queue = Channel.CreateBounded<CapturedClip>(new BoundedChannelOptions(16)
+    private sealed record Work(CapturedClip? Clip, TaskCompletionSource? Barrier);
+    private readonly Channel<Work> queue = Channel.CreateBounded<Work>(new BoundedChannelOptions(16)
     { SingleReader = true, SingleWriter = true, FullMode = BoundedChannelFullMode.Wait });
     private readonly HistoryStore store;
     private readonly AppPaths paths;
@@ -28,19 +29,28 @@ internal sealed class ClipboardCaptureWorker
     internal void Enqueue(CapturedClip clip)
     {
         long bytes = clip.Content.LongLength + (clip.Thumbnail?.LongLength ?? 0);
-        if (Interlocked.Add(ref queuedBytes, bytes) <= ByteBudget && queue.Writer.TryWrite(clip)) return;
+        if (Interlocked.Add(ref queuedBytes, bytes) <= ByteBudget && queue.Writer.TryWrite(new Work(clip, null))) return;
         Interlocked.Add(ref queuedBytes, -bytes);
         notice("保存队列暂时已满，本次内容已跳过。");
     }
 
     private async Task DrainAsync()
     {
-        await foreach (CapturedClip clip in queue.Reader.ReadAllAsync())
+        await foreach (Work work in queue.Reader.ReadAllAsync())
         {
+            if (work.Barrier != null) { work.Barrier.TrySetResult(); continue; }
+            CapturedClip clip = work.Clip!;
             try { await completed(await Task.Run(() => store.Save(clip))); }
             catch (Exception error) { paths.LogError("history-save", error); notice("内容保存失败，原始历史已保留。"); }
             finally { Interlocked.Add(ref queuedBytes, -clip.Content.LongLength - (clip.Thumbnail?.LongLength ?? 0)); }
         }
+    }
+
+    internal async Task FlushAsync()
+    {
+        var barrier = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        await queue.Writer.WriteAsync(new Work(null, barrier));
+        await barrier.Task;
     }
 
     internal Task CompleteAsync() { queue.Writer.TryComplete(); return draining; }

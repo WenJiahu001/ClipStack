@@ -2,6 +2,8 @@ using System;
 using System.IO;
 using System.Text;
 using System.Text.Json;
+using System.Diagnostics;
+using System.Linq;
 
 namespace ClipStack.Core;
 
@@ -15,6 +17,7 @@ public sealed class AppPaths
     public string Backups => Path.Combine(Root, "backups");
     public string Log => Path.Combine(Root, "diagnostics.log");
     public string PanelPosition => Path.Combine(Root, "panel-position.json");
+    private readonly object logGate = new();
 
     public AppPaths(string? root = null)
     {
@@ -39,7 +42,7 @@ public sealed class AppPaths
             LogError("settings-read", e);
             // 配置损坏时保留原文件，使用可用的默认值启动。
             try { File.Copy(Settings, Settings + ".invalid-" + DateTime.UtcNow.ToString("yyyyMMddHHmmss"), false); }
-            catch (IOException) { }
+            catch (Exception backupError) when (backupError is IOException or UnauthorizedAccessException) { }
             return new AppSettings();
         }
     }
@@ -74,16 +77,22 @@ public sealed class AppPaths
             { file.Write(data); file.Flush(true); }
             File.Move(temp, path, true);
         }
-        finally { try { File.Delete(temp); } catch (IOException) { } }
+        finally { try { File.Delete(temp); } catch (Exception error) when (error is IOException or UnauthorizedAccessException) { } }
     }
 
     public void LogError(string operation, Exception error)
     {
-        // 不记录异常消息、堆栈参数、文件路径或剪贴板正文。
+        // 仅记录方法名；不输出异常消息、文件路径、参数及复制内容。
         try
         {
-            if (File.Exists(Log) && new FileInfo(Log).Length > 512 * 1024) File.Move(Log, Log + ".previous", true);
-            File.AppendAllText(Log, $"{DateTimeOffset.UtcNow:O} {operation} {error.GetType().Name} 0x{error.HResult:X8}{Environment.NewLine}");
+            lock (logGate)
+            {
+                if (File.Exists(Log) && new FileInfo(Log).Length > 512 * 1024) File.Move(Log, Log + ".previous", true);
+                string frames = string.Join(" > ", (new StackTrace(error, false).GetFrames() ?? Array.Empty<StackFrame>())
+                    .Select(frame => frame.GetMethod()).Where(method => method?.DeclaringType?.Namespace?.StartsWith("ClipStack", StringComparison.Ordinal) == true)
+                    .Take(10).Select(method => method!.DeclaringType!.Name + "." + method.Name));
+                File.AppendAllText(Log, $"{DateTimeOffset.UtcNow:O} {operation} {error.GetType().Name} 0x{error.HResult:X8} {frames}{Environment.NewLine}");
+            }
         }
         catch (Exception e) when (e is IOException or UnauthorizedAccessException) { }
     }

@@ -23,6 +23,8 @@
           <RadioButton x:Name="RightPosition" Content="屏幕右侧" GroupName="Position" Style="{StaticResource NavButton}" />
         </WrapPanel>
         <TextBlock Text="下次呼出时生效；记住位置模式首次在屏幕右侧显示。" FontSize="11" Foreground="{StaticResource Muted}" TextWrapping="Wrap" Margin="0,6,0,8" />
+        <CheckBox x:Name="ResetFilterBox" Content="呼出时默认切换到「全部」" />
+        <TextBlock Text="默认开启；关闭后保留上次分类，搜索关键词保留。" FontSize="11" Foreground="{StaticResource Muted}" TextWrapping="Wrap" Margin="0,0,0,18" />
         <CheckBox x:Name="ResetListBox" Content="激活窗口时，滚动至顶部并选中首条" />
         <TextBlock Text="作用于当前搜索和分类下的记录，默认开启。" FontSize="11" Foreground="{StaticResource Muted}" Margin="0,0,0,18" />
         <CheckBox x:Name="HideAfterCopyBox" Content="复制后隐藏窗口" />

@@ -7,6 +7,7 @@ using System.Runtime.InteropServices;
 using System.Text;
 using System.Threading.Tasks;
 using System.Threading;
+using System.Collections.Generic;
 using System.Windows;
 using System.Windows.Interop;
 using System.Windows.Media;
@@ -26,6 +27,9 @@ internal sealed class ClipboardMonitor : IDisposable
     private bool disposed;
     private bool writing;
     private bool paused;
+    private bool accepting = true;
+    private readonly HashSet<Task> captures = new();
+    private readonly HashSet<uint> pendingSequences = new();
     private int policyGeneration;
     private readonly uint excludeFormat = NativeMethods.RegisterClipboardFormat("ExcludeClipboardContentFromMonitorProcessing");
     private readonly uint historyFormat = NativeMethods.RegisterClipboardFormat("CanIncludeInClipboardHistory");
@@ -39,6 +43,7 @@ internal sealed class ClipboardMonitor : IDisposable
         set { if (paused != value) { paused = value; policyGeneration++; generation++; } }
     }
     public HotkeyManager Hotkeys { get; }
+    internal int PendingCaptureCount => captures.Count;
 
     public ClipboardMonitor(Func<AppSettings> settings, Action<Exception> reportError)
     {
@@ -53,13 +58,34 @@ internal sealed class ClipboardMonitor : IDisposable
     public void SuppressCurrentClipboard() => suppressedSequence = NativeMethods.GetClipboardSequenceNumber();
     public void BeginWrite() { writing = true; generation++; }
     public void EndWrite() { SuppressCurrentClipboard(); writing = false; }
+    internal void InvalidatePending() { policyGeneration++; generation++; }
+    internal async Task StopAsync()
+    {
+        accepting = false;
+        NativeMethods.RemoveClipboardFormatListener(source.Handle);
+        await Task.WhenAll(captures.ToArray());
+    }
+    private Task ObserveCaptureAsync(Task task, uint sequence)
+    {
+        var completion = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        captures.Add(completion.Task);
+        _ = FinishAsync();
+        return completion.Task;
+        async Task FinishAsync()
+        {
+            try { await task; }
+            catch (Exception error) { reportError(error); Notice?.Invoke("本次内容读取失败，后续复制会继续记录。"); }
+            finally { pendingSequences.Remove(sequence); captures.Remove(completion.Task); completion.TrySetResult(); }
+        }
+    }
 
     private IntPtr WindowProc(IntPtr hwnd, int message, IntPtr wParam, IntPtr lParam, ref bool handled)
     {
         if (message == NativeMethods.ClipboardUpdate)
         {
-            int ticket = ++generation;
-            if (!Paused && !writing) _ = CaptureAsync(ticket, NativeMethods.GetClipboardSequenceNumber());
+            uint sequence = NativeMethods.GetClipboardSequenceNumber();
+            if (accepting && !Paused && !writing && pendingSequences.Add(sequence))
+                _ = ObserveCaptureAsync(CaptureAsync(++generation, sequence), sequence);
             handled = true;
         }
         else if (message == NativeMethods.HotkeyMessage) { HotkeyPressed?.Invoke(); handled = true; }
@@ -117,7 +143,7 @@ internal sealed class ClipboardMonitor : IDisposable
                         {
                             // 已复制 PNG 字节，不再持有剪贴板锁；完整解码与编码均移出 UI 线程。
                             byte[] snapshot = png;
-                            clip = await Task.Run(() => EncodePng(snapshot));
+                            clip = await BitmapCodec.ProcessAsync(() => EncodePng(snapshot));
                         }
                         else
                         {
@@ -126,7 +152,7 @@ internal sealed class ClipboardMonitor : IDisposable
                             if ((long)image.PixelWidth * image.PixelHeight > AppSettings.MaxImagePixels) { Notice?.Invoke("图片尺寸超过限制，已跳过。"); return; }
                             if (image.CanFreeze) image.Freeze();
                             BitmapSource snapshot = image;
-                            clip = await Task.Run(() => EncodeImage(snapshot));
+                            clip = await BitmapCodec.ProcessAsync(() => EncodeImage(snapshot));
                         }
                     }
                     finally { encoders.Release(); }

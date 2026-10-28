@@ -46,7 +46,7 @@
     </StackPanel>
    </DockPanel>
    <Grid Grid.Row="3" Margin="{DynamicResource PanelListMargin}">
-    <ListBox x:Name="HistoryList" ItemsSource="{Binding Items}" SelectedItem="{Binding SelectedItem}" Background="Transparent" BorderThickness="0" Padding="0"
+    <ListBox x:Name="HistoryList" ItemsSource="{Binding Items}" SelectedItem="{Binding SelectedItem}" Background="Transparent" BorderThickness="0" Padding="0" IsEnabled="{Binding CanInteractHistory}" ScrollViewer.ScrollChanged="OnHistoryScrollChanged"
      ScrollViewer.HorizontalScrollBarVisibility="Disabled" ScrollViewer.VerticalScrollBarVisibility="Auto"
      ScrollViewer.CanContentScroll="True" VirtualizingPanel.ScrollUnit="Pixel" VirtualizingPanel.CacheLength="1"
      VirtualizingPanel.IsVirtualizing="True" VirtualizingPanel.VirtualizationMode="Recycling" MouseDoubleClick="OnItemDoubleClick" AutomationProperties.Name="剪贴板历史列表">
@@ -96,7 +96,7 @@
    <Border Grid.Row="4" BorderBrush="{StaticResource Line}" BorderThickness="0,1,0,0" Margin="0,3,0,0" Padding="{DynamicResource PanelFooterPadding}">
     <Grid><Grid.RowDefinitions><RowDefinition Height="Auto" /><RowDefinition Height="Auto" /></Grid.RowDefinitions>
      <DockPanel>
-      <StackPanel Orientation="Horizontal" DockPanel.Dock="Right" IsEnabled="{Binding HasSelection}">
+      <StackPanel Orientation="Horizontal" DockPanel.Dock="Right" IsEnabled="{Binding CanUseSelection}">
        <Button Content="查看" Click="OnPreview" Padding="9,5" Background="Transparent" ToolTip="查看全文或大图（列表中按空格）" Margin="0,0,6,0" />
        <Button Content="粘贴 ↵" Click="OnPaste" Padding="12,5" Style="{StaticResource PrimaryButton}" />
       </StackPanel>

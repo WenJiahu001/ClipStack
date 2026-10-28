@@ -27,6 +27,7 @@ public partial class App : System.Windows.Application
     private Task<string?>? settingsSave;
     private DispatcherTimer? cleanupTimer;
     private bool exiting, shuttingDown;
+    private bool handlingFatalError;
 
     protected override async void OnStartup(StartupEventArgs e)
     {
@@ -37,6 +38,11 @@ public partial class App : System.Windows.Application
         {
             StartupOptions options = StartupOptions.Parse(e.Args);
             diagnostic = options.IsDiagnostic;
+            if (options.RestoreBackup != null)
+            {
+                if (options.DataDirectory == null) throw new ArgumentException("恢复备份须指定 --data-dir，且目标目录必须尚不存在。");
+                HistoryBackup.Restore(options.RestoreBackup, options.DataDirectory); Shutdown(); return;
+            }
             if (options.PasteTarget != null) { await PasteTargetProbe.RunAsync(options.PasteTarget); Shutdown(); return; }
             if (!diagnostic)
             {
@@ -122,7 +128,14 @@ public partial class App : System.Windows.Application
         try
         {
             if (includeFavorites && MessageBox.Show(panel, "将删除全部历史和收藏，此操作无法撤销。继续吗？", "删除全部记录", MessageBoxButton.OKCancel, MessageBoxImage.Warning) != MessageBoxResult.OK) return;
-            await history.ClearAsync(includeFavorites);
+            bool wasPaused = monitor?.Paused ?? true;
+            if (monitor != null) { monitor.Paused = true; monitor.InvalidatePending(); }
+            try
+            {
+                if (captures != null) await captures.FlushAsync();
+                await history.ClearAsync(includeFavorites);
+            }
+            finally { if (monitor != null) monitor.Paused = wasPaused; }
         }
         finally { panel.KeepOpen = false; }
     }
@@ -141,12 +154,14 @@ public partial class App : System.Windows.Application
     private async Task<string?> SaveSettingsAsync(AppSettings settings)
     {
         string? error = await settingsService!.SaveAsync(settings);
+        model!.HotkeyLabel = monitor!.Hotkeys.ActiveHotkey.Replace("+", " + ");
         if (error == null)
         {
             panel!.ApplySettings(store!.Settings);
             tray!.SetVisible(store.Settings.ShowTrayIcon);
-            model!.HotkeyLabel = monitor!.Hotkeys.ActiveHotkey.Replace("+", " + ");
-            await history!.RefreshAsync(); SetStatus("设置已保存。");
+            monitor!.InvalidatePending();
+            await history!.GuardAsync("settings-refresh", () => history.RefreshAsync());
+            SetStatus(settingsService.Warning ?? "设置已保存。");
         }
         return error;
     }
@@ -163,7 +178,20 @@ public partial class App : System.Windows.Application
     private void OnUnhandledException(object sender, DispatcherUnhandledExceptionEventArgs e)
     {
         paths?.LogError("ui-unhandled", e.Exception); e.Handled = true;
-        SetStatus("操作遇到异常，历史数据已保留。可退出后重新打开。");
+        if (handlingFatalError) { Shutdown(1); return; }
+        handlingFatalError = true;
+        _ = RecoverFromFatalErrorAsync();
+    }
+    private async Task RecoverFromFatalErrorAsync()
+    {
+        if (monitor != null) monitor.Paused = true;
+        if (model != null) model.Paused = true;
+        tray?.SetPaused(true);
+        MessageBoxResult choice = MessageBox.Show("界面出现未预期异常，记录已暂停。是否保存已采集内容并退出？选择“否”将保留窗口，方便处理尚未保存的备注。",
+            "ClipStack", MessageBoxButton.YesNo, MessageBoxImage.Warning);
+        if (choice == MessageBoxResult.Yes) await ExitAsync();
+        else SetStatus("已暂停记录，请处理未保存的备注后退出重开。");
+        handlingFatalError = false;
     }
     private async Task ExitAsync()
     {
@@ -172,13 +200,25 @@ public partial class App : System.Windows.Application
         if (panel != null && !await panel.CommitPendingNotesAsync()) { panel.ShowPanel(); return; }
         if (exiting) return;
         exiting = true; cleanupTimer?.Stop();
-        if (settingsSave != null) await settingsSave;
-        if (history != null) await history.StopAsync();
-        monitor?.Dispose(); monitor = null;
-        if (captures != null) await captures.CompleteAsync();
-        shuttingDown = true;
-        if (panel != null) panel.AllowClose = true;
-        Shutdown();
+        try
+        {
+            if (settingsSave != null) await settingsSave;
+            if (monitor != null) await monitor.StopAsync();
+            if (captures != null) await captures.CompleteAsync();
+            if (history != null) await history.StopAsync();
+            monitor?.Dispose(); monitor = null;
+            shuttingDown = true;
+            if (panel != null) panel.AllowClose = true;
+            Shutdown();
+        }
+        catch (Exception error)
+        {
+            paths?.LogError("exit", error); exiting = false;
+            SetStatus("退出未完成，请检查磁盘后重试。程序已暂停记录。");
+            if (monitor != null) monitor.Paused = true;
+            if (model != null) model.Paused = true;
+            tray?.SetPaused(true); panel?.ShowPanel();
+        }
     }
     protected override void OnExit(ExitEventArgs e)
     {

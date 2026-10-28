@@ -31,7 +31,7 @@ internal static class SmokeChecks
         string output = Path.GetFullPath(report); Directory.CreateDirectory(Path.GetDirectoryName(output)!);
         File.WriteAllText(output, JsonSerializer.Serialize(new
         {
-            success = saved.Saved && roundTrip && imageOk, version = "0.1.0", os = RuntimeInformation.OSDescription,
+            success = saved.Saved && roundTrip && imageOk, version = typeof(App).Assembly.GetName().Version?.ToString(), os = RuntimeInformation.OSDescription,
             architecture = RuntimeInformation.ProcessArchitecture.ToString(), runtime = Environment.Version.ToString(),
             runtimeModulePath, sqliteModulePath,
             runtimeDirectory = RuntimeEnvironment.GetRuntimeDirectory(),

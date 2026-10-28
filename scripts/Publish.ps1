@@ -55,7 +55,7 @@ try {
     $panelReport = Join-Path $qaDirectory 'panel-checks.json'
     $panelArguments = '--panel-test "' + $panelReport + '" --data-dir "' + (Join-Path $qaDirectory ('panel-' + [Guid]::NewGuid().ToString('N'))) + '"'
     $panelProcess = Start-Process -FilePath $executable -ArgumentList $panelArguments -WindowStyle Hidden -PassThru
-    if (-not $panelProcess.WaitForExit(20000)) {
+    if (-not $panelProcess.WaitForExit(45000)) {
         Stop-Process -Id $panelProcess.Id -ErrorAction SilentlyContinue
         throw '窗口交互检查超时。'
     }
@@ -98,6 +98,8 @@ try {
     $checksum = (Get-FileHash $executable -Algorithm SHA256).Hash.ToLowerInvariant()
     [System.IO.File]::WriteAllText((Join-Path $publishDirectory 'SHA256SUMS.txt'), "$checksum  ClipStack.exe`n")
     Copy-Item -LiteralPath (Join-Path $projectRoot 'docs\使用说明.md') -Destination $publishDirectory -Force
+    $releaseVersion = ([xml](Get-Content -LiteralPath (Join-Path $projectRoot 'Directory.Build.props') -Raw)).Project.PropertyGroup.Version
+    Copy-Item -LiteralPath (Join-Path $projectRoot "docs\releases\v$releaseVersion.md") -Destination (Join-Path $publishDirectory '发布说明.md') -Force
     Copy-Item -LiteralPath (Join-Path $projectRoot 'LICENSE') -Destination $publishDirectory -Force
     Copy-Item -LiteralPath (Join-Path $projectRoot 'docs\第三方组件.md') -Destination $publishDirectory -Force
     Copy-Item -LiteralPath (Join-Path $projectRoot 'docs\验收记录.md') -Destination $publishDirectory -Force
@@ -107,12 +109,14 @@ try {
         $benchmarkPath = Join-Path $qaDirectory $benchmark
         if (Test-Path -LiteralPath $benchmarkPath) { Copy-Item -LiteralPath $benchmarkPath -Destination $publishDirectory -Force }
     }
-    $migrationSql = Get-Content -LiteralPath (Join-Path $projectRoot 'src\ClipStack.Core\Migrations\002_favorite_notes.sql') -Raw
-    [System.IO.File]::WriteAllText((Join-Path $publishDirectory '数据库升级.sql'), "-- 仅适用于 v1 数据库。新版会自动备份并升级，无需手动执行；v2 不可重复执行。`nBEGIN IMMEDIATE;`n$migrationSql`nCOMMIT;`n")
+    $notesSql = Get-Content -LiteralPath (Join-Path $projectRoot 'src\ClipStack.Core\Migrations\002_favorite_notes.sql') -Raw
+    $sortSql = Get-Content -LiteralPath (Join-Path $projectRoot 'src\ClipStack.Core\Migrations\003_sort_order.sql') -Raw
+    [System.IO.File]::WriteAllText((Join-Path $publishDirectory '数据库升级.sql'), "-- 仅适用于 v1 → v3。程序会自动完整备份并升级，无需手动执行；不可重复执行。`nBEGIN IMMEDIATE;`n$notesSql`n$sortSql`nCOMMIT;`n")
+    [System.IO.File]::WriteAllText((Join-Path $publishDirectory '数据库升级-v2到v3.sql'), "-- 仅适用于 v2 → v3。程序会自动完整备份并升级，无需手动执行；不可重复执行。`nBEGIN IMMEDIATE;`n$sortSql`nCOMMIT;`n")
     $archive = Join-Path $publishDirectory 'ClipStack-win-x64.zip'
     # 公开下载包使用明确清单，避免混入本机诊断路径、旧报告或用户临时文件。
     $archiveFiles = @('ClipStack.exe', 'LICENSE', 'THIRD-PARTY-NOTICES.txt', 'licenses',
-        '使用说明.md', '第三方组件.md', 'SHA256SUMS.txt') | ForEach-Object { Join-Path $publishDirectory $_ }
+        '使用说明.md', '发布说明.md', '第三方组件.md', 'SHA256SUMS.txt') | ForEach-Object { Join-Path $publishDirectory $_ }
     Compress-Archive -LiteralPath $archiveFiles -DestinationPath $archive -Force
     Write-Output "发布完成：$executable"
     Write-Output "完整发布包：$archive"

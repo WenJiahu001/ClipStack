@@ -20,7 +20,7 @@ public partial class MainWindow : Window
 {
     private readonly WindowPlacementController placement;
     private readonly HashSet<InlineNoteEditor> noteEditors = new();
-    private bool resetListOnActivate = true, hideAfterCopy = true, resetAfterRefresh;
+    private bool resetListOnActivate = true, resetFilterOnShow = true, hideAfterCopy = true, resetAfterRefresh;
     internal MainViewModel Model { get; }
     internal bool KeepOpen { get; set; }
     internal bool PreviewMode { get; set; }
@@ -37,6 +37,12 @@ public partial class MainWindow : Window
     internal event Action? SettingsRequested;
     internal event Action<bool>? ClearRequested;
     internal event Action? ExitRequested;
+    internal event Action? MoreHistoryRequested;
+    private void OnHistoryScrollChanged(object sender, ScrollChangedEventArgs e)
+    {
+        if (e.VerticalChange > 0 && e.VerticalOffset + e.ViewportHeight >= e.ExtentHeight - e.ViewportHeight)
+            MoreHistoryRequested?.Invoke();
+    }
 
     internal MainWindow(MainViewModel model, AppPaths paths)
     {
@@ -57,6 +63,7 @@ public partial class MainWindow : Window
     {
         ApplyDensity(settings.MainWindowDensity);
         resetListOnActivate = settings.ResetListOnActivate;
+        resetFilterOnShow = settings.ResetFilterOnShow;
         hideAfterCopy = settings.HideAfterCopy;
         placement.Mode = settings.WindowPosition;
         if (!resetListOnActivate) resetAfterRefresh = false;
@@ -98,6 +105,13 @@ public partial class MainWindow : Window
         new WindowInteropHelper(this).EnsureHandle();
         if (WindowState == WindowState.Minimized) WindowState = WindowState.Normal;
         placement.Place(PasteTarget);
+        if (!KeepOpen && !Model.IsEditingNote && resetFilterOnShow)
+        {
+            // 仅在主动呼出时重置分类，所属弹窗返回和备注编辑期间保持当前上下文。
+            Model.Filter = HistoryFilter.All;
+            foreach (RadioButton option in FilterOptions.Children.OfType<RadioButton>())
+                if (option.Tag as string == nameof(HistoryFilter.All)) option.IsChecked = true;
+        }
         Show();
         Activate();
         if (!KeepOpen && !Model.IsEditingNote && resetListOnActivate)
@@ -177,8 +191,10 @@ public partial class MainWindow : Window
 
     private async Task DispatchItemActionAsync(object sender, Action action)
     {
+        if (!Model.ResultsCurrent) { Model.StatusMessage = "正在更新搜索结果，请稍候。"; return; }
         string? id = (sender as FrameworkElement)?.DataContext is ClipItem item ? item.Id : Model.SelectedItem?.Id;
         if (!await CommitPendingNotesAsync()) return;
+        if (!Model.ResultsCurrent) return;
         if (id != null) Model.SelectedItem = Model.Items.FirstOrDefault(item => item.Id == id);
         action();
     }
@@ -199,7 +215,7 @@ public partial class MainWindow : Window
     }
     private async void OnPreview(object sender, RoutedEventArgs e)
     {
-        if (!await CommitPendingNotesAsync() || !Model.HasSelection || KeepOpen) return;
+        if (!await CommitPendingNotesAsync() || !Model.CanUseSelection || KeepOpen) return;
         string? previewId = Model.SelectedItem?.Id;
         KeepOpen = true;
         try

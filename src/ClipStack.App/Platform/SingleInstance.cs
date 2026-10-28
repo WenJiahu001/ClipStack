@@ -17,12 +17,12 @@ internal sealed class SingleInstance : IDisposable
     private bool disposed;
     public bool IsPrimary => owned;
 
-    public SingleInstance()
+    public SingleInstance(string? scope = null)
     {
         using var identity = WindowsIdentity.GetCurrent();
         using var process = Process.GetCurrentProcess();
         string sid = identity.User?.Value ?? Environment.UserName;
-        pipeName = "ClipStack-" + sid + "-" + process.SessionId;
+        pipeName = "ClipStack-" + sid + "-" + process.SessionId + (scope == null ? "" : "-" + scope);
         mutex = new Mutex(true, @"Local\" + pipeName, out owned);
     }
 

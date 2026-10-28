@@ -26,6 +26,8 @@ internal sealed class HistoryController : IDisposable
     private bool disposed, usingClip, exiting, refreshPending;
     private bool captureRefreshScheduled;
     private readonly HashSet<Task> operations = new();
+    private const int PageSize = 100;
+    private int loadedLimit = PageSize;
     internal event Action<string>? NotificationRequested;
 
     internal HistoryController(HistoryStore store, AppPaths paths, MainViewModel model, MainWindow panel, ClipboardMonitor? monitor = null)
@@ -38,6 +40,7 @@ internal sealed class HistoryController : IDisposable
         model.SearchRequested += DebounceRefresh;
         model.SelectionChanged += OnSelectionChanged;
         model.EditingChanged += OnEditingChanged;
+        panel.MoreHistoryRequested += LoadMore;
     }
 
     private void OnSelectionChanged()
@@ -52,6 +55,8 @@ internal sealed class HistoryController : IDisposable
     private void OnEditingChanged() { if (!model.IsEditingNote && refreshPending) { refreshPending = false; DebounceRefresh(); } }
     private void DebounceRefresh()
     {
+        model.ResultsCurrent = false;
+        loadedLimit = PageSize;
         refreshCancellation?.Cancel();
         int ticket = ++refreshGeneration;
         _ = RunAsync();
@@ -60,6 +65,12 @@ internal sealed class HistoryController : IDisposable
             await Task.Delay(160);
             if (ticket == refreshGeneration && !disposed) await GuardAsync("history-query", () => RefreshAsync());
         }
+    }
+    internal void LoadMore()
+    {
+        if (!model.HasMore || model.IsLoading || !model.ResultsCurrent || model.IsEditingNote || disposed || exiting) return;
+        loadedLimit += PageSize;
+        _ = GuardAsync("history-more", () => RefreshAsync());
     }
     internal void RequestRefresh()
     {
@@ -90,7 +101,7 @@ internal sealed class HistoryController : IDisposable
         string? selectedId = preferredId ?? model.SelectedItem?.Id;
         model.IsLoading = true;
         IReadOnlyList<ClipEntry> entries;
-        try { entries = await Task.Run(() => store.Query(query, filter, cancellation.Token), cancellation.Token); }
+        try { entries = await Task.Run(() => store.Query(query, filter, cancellation.Token, loadedLimit + 1), cancellation.Token); }
         catch (OperationCanceledException) when (cancellation.IsCancellationRequested) { return; }
         finally
         {
@@ -98,6 +109,8 @@ internal sealed class HistoryController : IDisposable
         }
         if (ticket != refreshGeneration || disposed || exiting) return;
         if (model.IsEditingNote) { refreshPending = true; return; }
+        model.HasMore = entries.Count > loadedLimit;
+        entries = entries.Take(loadedLimit).ToArray();
         var existing = model.Items.ToDictionary(item => item.Id);
         ClipItem[] items = entries.Select(entry =>
         {
@@ -107,13 +120,14 @@ internal sealed class HistoryController : IDisposable
         // 无增删或排序变化时保留 ItemsSource，避免重建卡片、滚动位置和选择。
         if (!model.Items.SequenceEqual(items)) model.Items = items;
         model.SelectedItem = items.FirstOrDefault(x => x.Id == selectedId) ?? items.FirstOrDefault();
+        model.ResultsCurrent = true;
         panel.OnHistoryRefreshed();
     }
 
     internal Task LoadSelectionAsync() => TrackAsync(LoadSelectionCoreAsync);
     private async Task LoadSelectionCoreAsync()
     {
-        if (disposed || exiting) return;
+        if (disposed || exiting || !model.ResultsCurrent) return;
         int ticket = ++selectionGeneration;
         ClipItem? item = model.SelectedItem;
         model.PreviewImage = null;
@@ -132,7 +146,7 @@ internal sealed class HistoryController : IDisposable
             }
             else
             {
-                ImageSource image = await Task.Run(() => BitmapCodec.Decode(bytes));
+                ImageSource image = await BitmapCodec.ProcessAsync(() => BitmapCodec.Decode(bytes));
                 if (ticket == selectionGeneration && !disposed && !exiting) model.PreviewImage = image;
             }
         }
@@ -146,7 +160,7 @@ internal sealed class HistoryController : IDisposable
     internal Task UseSelectedAsync(bool paste) => TrackAsync(() => UseSelectedCoreAsync(paste));
     private async Task UseSelectedCoreAsync(bool paste)
     {
-        if (usingClip || model.SelectedItem == null || monitor == null || disposed || exiting) return;
+        if (usingClip || !model.ResultsCurrent || model.SelectedItem == null || monitor == null || disposed || exiting) return;
         usingClip = true;
         ClipItem item = model.SelectedItem;
         try
@@ -154,6 +168,7 @@ internal sealed class HistoryController : IDisposable
             byte[] content = await Task.Run(() => store.ReadContent(item.Entry));
             if (disposed || exiting) return;
             await PasteService.WriteAsync(item.Entry, content, monitor);
+            uint clipboardSequence = NativeMethods.GetClipboardSequenceNumber();
             if (disposed || exiting) return;
             await Task.Run(() => store.MarkUsed(item.Id));
             if (disposed || exiting) return;
@@ -161,8 +176,12 @@ internal sealed class HistoryController : IDisposable
             {
                 IntPtr target = panel.PasteTarget;
                 panel.Hide();
-                bool sent = await PasteService.TryPasteAsync(target);
-                if (!sent) Notify("内容已复制。请返回目标应用，按 Ctrl+V 手动粘贴。");
+                bool sent = await PasteService.TryPasteAsync(target, expectedSequence: clipboardSequence);
+                if (!sent)
+                {
+                    panel.ShowPanel();
+                    Notify("自动粘贴未完成。请点击复制，再返回目标应用按 Ctrl+V。");
+                }
                 else SetStatus("已发送粘贴操作；目标应用若未接收，可按 Ctrl+V 再试。");
             }
             else
@@ -184,12 +203,14 @@ internal sealed class HistoryController : IDisposable
 
     internal Task ChangeFavoriteAsync() => GuardAsync("favorite", async () =>
     {
+        if (!model.ResultsCurrent) return;
         ClipItem? item = model.SelectedItem; if (item == null) return;
         await Task.Run(() => store.SetFavorite(item.Id, !item.Entry.Favorite)); await RefreshAsync(item.Id);
     });
 
     internal Task DeleteSelectedAsync() => GuardAsync("delete", async () =>
     {
+        if (!model.ResultsCurrent) return;
         ClipItem? item = model.SelectedItem; if (item == null) return;
         await Task.Run(() => store.Delete(item.Id)); await RefreshAsync(); SetStatus("记录已删除。");
     });
@@ -253,6 +274,7 @@ internal sealed class HistoryController : IDisposable
         panel.ThumbnailRequested -= thumbnails.Load; panel.ThumbnailReleased -= thumbnails.Release;
         panel.LoadPreviewAsync = null;
         model.SearchRequested -= DebounceRefresh; model.SelectionChanged -= OnSelectionChanged; model.EditingChanged -= OnEditingChanged;
+        panel.MoreHistoryRequested -= LoadMore;
     }
 }
 

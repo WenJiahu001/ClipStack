@@ -6,7 +6,7 @@
     <LangVersion>latest</LangVersion>
     <Deterministic>true</Deterministic>
     <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
-    <Version>0.1.0</Version>
+    <Version>0.2.0</Version>
     <Company>ClipStack</Company>
     <Product>ClipStack</Product>
     <RepositoryUrl>https://github.com/WenJiahu001/ClipStack</RepositoryUrl>

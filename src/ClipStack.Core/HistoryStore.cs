@@ -13,10 +13,12 @@ public sealed class HistoryStore : IDisposable
 {
     private const int ListTextLimit = 512;
     private readonly object gate = new();
+    private readonly object queryGate = new(), cacheGate = new();
+    private long contentRevision;
     private readonly AppPaths paths;
     private readonly UserProtection protection;
     private readonly SqliteConnection connection;
-    private bool disposed;
+    private volatile bool disposed;
     private sealed record DecodedSummary(string? Text, bool Truncated, bool Unreadable, string? Note, bool NoteUnreadable);
     private readonly BoundedCache<DecodedSummary> summaries = new(16 * 1024 * 1024, 10000);
     private readonly BoundedCache<string> fullTexts = new(16 * 1024 * 1024, 4096);
@@ -56,6 +58,7 @@ public sealed class HistoryStore : IDisposable
                 string? id = existing.ExecuteScalar() as string;
                 if (id != null)
                 {
+                    RepairDuplicate(id, clip);
                     Promote(id, now, used: false);
                     return new SaveResult(true, "已更新重复内容的复制时间", id);
                 }
@@ -79,8 +82,8 @@ public sealed class HistoryStore : IDisposable
                 if (imageName != null) AppPaths.AtomicWrite(paths.ImagePath(imageName), payload);
                 if (thumbName != null) AppPaths.AtomicWrite(paths.ImagePath(thumbName), thumb!);
                 Execute("""
-                    INSERT INTO clips(id,kind,fingerprint,text_payload,image_file,thumbnail_file,size_bytes,width,height,created_utc,copied_utc)
-                    VALUES($id,$kind,$hash,$text,$image,$thumb,$bytes,$w,$h,$now,$now);
+                    INSERT INTO clips(id,kind,fingerprint,text_payload,image_file,thumbnail_file,size_bytes,width,height,created_utc,copied_utc,sort_order)
+                    VALUES($id,$kind,$hash,$text,$image,$thumb,$bytes,$w,$h,$now,$now,(SELECT COALESCE(MAX(sort_order),0)+1 FROM clips));
                     """, transaction, ("$id", newId), ("$kind", (int)clip.Kind), ("$hash", fingerprint),
                     ("$text", clip.Kind == ClipKind.Text ? payload : null), ("$image", imageName), ("$thumb", thumbName),
                     ("$bytes", bytes), ("$w", clip.Width), ("$h", clip.Height), ("$now", now));
@@ -113,13 +116,19 @@ public sealed class HistoryStore : IDisposable
         return null;
     }
 
-    public IReadOnlyList<ClipEntry> Query(string? query = null, HistoryFilter filter = HistoryFilter.All, CancellationToken cancellationToken = default)
+    public IReadOnlyList<ClipEntry> Query(string? query = null, HistoryFilter filter = HistoryFilter.All, CancellationToken cancellationToken = default, int limit = int.MaxValue)
     {
+        ArgumentOutOfRangeException.ThrowIfNegativeOrZero(limit);
         cancellationToken.ThrowIfCancellationRequested();
-        lock (gate)
+        // 查询独占自己的只读连接；长文本解密不再占用写入连接和存储锁。
+        lock (queryGate)
         {
             cancellationToken.ThrowIfCancellationRequested();
             EnsureOpen();
+            long revision = Interlocked.Read(ref contentRevision);
+            using var readConnection = new SqliteConnection(new SqliteConnectionStringBuilder
+            { DataSource = paths.Database, Mode = SqliteOpenMode.ReadOnly, Pooling = false, DefaultTimeout = 3 }.ToString());
+            readConnection.Open();
             string term = (query ?? "").Trim();
             var result = new List<ClipEntry>();
             string predicate = filter switch
@@ -127,7 +136,8 @@ public sealed class HistoryStore : IDisposable
                 HistoryFilter.Text => " WHERE kind=1", HistoryFilter.Image => " WHERE kind=2",
                 HistoryFilter.Favorites => " WHERE favorite=1", _ => ""
             };
-            using var command = Command("SELECT id,kind,text_payload,image_file,thumbnail_file,size_bytes,width,height,created_utc,copied_utc,used_utc,favorite,note_payload FROM clips" + predicate + " ORDER BY copied_utc DESC;");
+            using var command = readConnection.CreateCommand();
+            command.CommandText = "SELECT id,kind,text_payload,image_file,thumbnail_file,size_bytes,width,height,created_utc,copied_utc,used_utc,favorite,note_payload FROM clips" + predicate + " ORDER BY sort_order DESC,id DESC;";
             using var reader = command.ExecuteReader();
             while (reader.Read())
             {
@@ -135,7 +145,9 @@ public sealed class HistoryStore : IDisposable
                 string id = reader.GetString(0);
                 var kind = (ClipKind)reader.GetInt32(1);
                 bool favorite = reader.GetBoolean(11);
-                if (!summaries.TryGet(id, out var summary))
+                DecodedSummary? summary;
+                lock (cacheGate) { if (revision != contentRevision || !summaries.TryGet(id, out summary)) summary = null; }
+                if (summary == null)
                 {
                     string? text = null, note = null;
                     bool unreadable = false, noteUnreadable = false, truncated = false;
@@ -148,7 +160,7 @@ public sealed class HistoryStore : IDisposable
                     {
                         try
                         {
-                            text = DecodeText(reader, id);
+                            text = DecodeText(reader, id, revision);
                             truncated = text.Length > ListTextLimit;
                             if (truncated)
                             {
@@ -159,7 +171,8 @@ public sealed class HistoryStore : IDisposable
                         catch (CryptographicException) { unreadable = true; }
                     }
                     summary = new DecodedSummary(text, truncated, unreadable, note, noteUnreadable);
-                    summaries.Set(id, summary, 192L + 2L * ((text?.Length ?? 0) + (note?.Length ?? 0)));
+                    lock (cacheGate)
+                        if (!disposed && revision == contentRevision) summaries.Set(id, summary, 192L + 2L * ((text?.Length ?? 0) + (note?.Length ?? 0)));
                 }
                 var entry = new ClipEntry(id, kind, summary.Text,
                     reader.IsDBNull(3) ? null : reader.GetString(3), reader.IsDBNull(4) ? null : reader.GetString(4),
@@ -171,29 +184,33 @@ public sealed class HistoryStore : IDisposable
                     && !(favorite && summary.Note?.Contains(term, StringComparison.OrdinalIgnoreCase) == true))
                 {
                     if (kind != ClipKind.Text || summary.Unreadable || !summary.Truncated
-                        || !DecodeText(reader, id).Contains(term, StringComparison.OrdinalIgnoreCase)) continue;
+                        || !DecodeText(reader, id, revision).Contains(term, StringComparison.OrdinalIgnoreCase)) continue;
                 }
                 result.Add(entry);
+                if (result.Count >= limit) break;
             }
             return result;
         }
     }
 
-    private string DecodeText(SqliteDataReader reader, string id)
+    private string DecodeText(SqliteDataReader reader, string id, long revision)
     {
-        if (fullTexts.TryGet(id, out var text)) return text;
-        text = Encoding.UTF8.GetString(UserProtection.Unprotect((byte[])reader[2]));
+        lock (cacheGate)
+            if (revision == contentRevision && fullTexts.TryGet(id, out var cached)) return cached;
+        string text = Encoding.UTF8.GetString(UserProtection.Unprotect((byte[])reader[2]));
         // 小文本已经保留在摘要里；仅缓存全文搜索需要的长文本，且有容量上限。
-        if (text.Length > ListTextLimit) fullTexts.Set(id, text, text.Length * 2L + 128);
+        lock (cacheGate)
+            if (!disposed && revision == contentRevision && text.Length > ListTextLimit) fullTexts.Set(id, text, text.Length * 2L + 128);
         return text;
     }
 
-    public byte[] ReadContent(ClipEntry entry, bool thumbnail = false)
+    public byte[] ReadContent(ClipEntry entry, bool thumbnail = false) => ReadContent(entry.Id, thumbnail);
+    private byte[] ReadContent(string id, bool thumbnail = false)
     {
         lock (gate)
         {
             EnsureOpen();
-            using var command = Command("SELECT kind,text_payload,image_file,thumbnail_file FROM clips WHERE id=$id;", null, ("$id", entry.Id));
+            using var command = Command("SELECT kind,text_payload,image_file,thumbnail_file FROM clips WHERE id=$id;", null, ("$id", id));
             using var reader = command.ExecuteReader();
             if (!reader.Read()) throw new FileNotFoundException("这条记录已被删除。");
             if ((ClipKind)reader.GetInt32(0) == ClipKind.Text) return UserProtection.Unprotect((byte[])reader[1]);
@@ -222,7 +239,7 @@ public sealed class HistoryStore : IDisposable
             using var command = Command("UPDATE clips SET note_payload=$note WHERE id=$id AND favorite=1;", null,
                 ("$note", payload), ("$id", id));
             if (command.ExecuteNonQuery() != 1) throw new InvalidOperationException("这条记录已删除或已取消收藏，请重新选择。");
-            summaries.Remove(id);
+            Invalidate(id);
         }
     }
 
@@ -233,9 +250,9 @@ public sealed class HistoryStore : IDisposable
 
     private void Promote(string id, long now, bool used)
     {
-        // 复用复制时间的排序索引；同毫秒或时钟回拨时仍严格排到首位，保留原 ID、收藏和备注。
+        // 序号单调递增，真实时间只负责展示和保留期限。
         Execute("""
-            UPDATE clips SET copied_utc=MAX($now,(SELECT MAX(copied_utc)+1 FROM clips)),
+            UPDATE clips SET copied_utc=$now,sort_order=(SELECT COALESCE(MAX(sort_order),0)+1 FROM clips),
                 used_utc=CASE WHEN $used=1 THEN $now ELSE used_utc END WHERE id=$id;
             """, null, ("$now", now), ("$used", used ? 1 : 0), ("$id", id));
     }
@@ -277,7 +294,6 @@ public sealed class HistoryStore : IDisposable
             AppSettings normalized = settings.Normalize();
             paths.SaveSettings(normalized);
             Settings = normalized;
-            PruneAndCollect();
         }
     }
 
@@ -323,7 +339,7 @@ public sealed class HistoryStore : IDisposable
         bool imagePressure = imageBytes + incomingBytes > budget;
         using (var command = Command("SELECT id,kind,size_bytes FROM clips WHERE favorite=0"
             + (imagePressure && count + incomingCount <= Settings.MaxEntries ? " AND kind=2" : "")
-            + " ORDER BY copied_utc ASC LIMIT $limit;", transaction,
+            + " ORDER BY sort_order ASC LIMIT $limit;", transaction,
             ("$limit", imagePressure ? -1L : count + incomingCount - Settings.MaxEntries)))
         using (var reader = command.ExecuteReader())
             while (reader.Read()) candidates.Add((reader.GetString(0), reader.GetInt32(1), reader.GetInt64(2)));
@@ -334,7 +350,7 @@ public sealed class HistoryStore : IDisposable
             if (count + incomingCount <= Settings.MaxEntries && candidate.Kind != (int)ClipKind.Image) continue;
             CollectFiles("id=$id", transaction, deleted, ("$id", candidate.Id));
             Execute("DELETE FROM clips WHERE id=$id;", transaction, ("$id", candidate.Id));
-            summaries.Remove(candidate.Id); fullTexts.Remove(candidate.Id);
+            Invalidate(candidate.Id);
             count--;
             if (candidate.Kind == (int)ClipKind.Image) imageBytes -= candidate.Size;
         }
@@ -352,8 +368,36 @@ public sealed class HistoryStore : IDisposable
     {
         using var command = Command("SELECT id FROM clips WHERE " + condition + ";", transaction, parameters);
         using var reader = command.ExecuteReader();
-        while (reader.Read()) { string id = reader.GetString(0); summaries.Remove(id); fullTexts.Remove(id); }
+        while (reader.Read()) Invalidate(reader.GetString(0));
     }
+
+    private void Invalidate(string id)
+    {
+        lock (cacheGate) { contentRevision++; summaries.Remove(id); fullTexts.Remove(id); }
+    }
+
+    private void RepairDuplicate(string id, CapturedClip clip)
+    {
+        try
+        {
+            bool healthy = ReadContent(id).AsSpan().SequenceEqual(clip.Content);
+            if (clip.Thumbnail != null) healthy &= ReadContent(id, true).AsSpan().SequenceEqual(clip.Thumbnail);
+            if (healthy) return;
+        }
+        catch (Exception error) when (error is CryptographicException or IOException or InvalidDataException) { paths.LogError("duplicate-repair", error); }
+        byte[] payload = UserProtection.Protect(clip.Content);
+        byte[]? thumb = clip.Thumbnail == null ? null : UserProtection.Protect(clip.Thumbnail);
+        string? image = clip.Kind == ClipKind.Image ? id + ".bin" : null;
+        string? thumbnail = image != null && thumb != null ? id + ".thumb.bin" : null;
+        if (image != null) AppPaths.AtomicWrite(paths.ImagePath(image), payload);
+        if (thumbnail != null) AppPaths.AtomicWrite(paths.ImagePath(thumbnail), thumb!);
+        Execute("UPDATE clips SET text_payload=$text,image_file=$image,thumbnail_file=$thumb,size_bytes=$size WHERE id=$id;", null,
+            ("$text", image == null ? payload : null), ("$image", image), ("$thumb", thumbnail),
+            ("$size", payload.LongLength + (thumb?.LongLength ?? 0)), ("$id", id));
+        Invalidate(id);
+    }
+
+    public string CreateBackup() { lock (gate) { EnsureOpen(); return HistoryBackup.Create(connection, paths); } }
 
     private void DeleteFiles(IEnumerable<string> files)
     {
@@ -381,6 +425,12 @@ public sealed class HistoryStore : IDisposable
     private void EnsureOpen() => ObjectDisposedException.ThrowIf(disposed, this);
     public void Dispose()
     {
-        lock (gate) { if (disposed) return; disposed = true; summaries.Clear(); fullTexts.Clear(); connection.Dispose(); protection.Dispose(); }
+        lock (gate)
+        {
+            if (disposed) return;
+            disposed = true;
+            lock (cacheGate) { contentRevision++; summaries.Clear(); fullTexts.Clear(); }
+            connection.Dispose(); protection.Dispose();
+        }
     }
 }

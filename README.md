@@ -52,7 +52,7 @@ dotnet run --project tests/ClipStack.Tests/ClipStack.Tests.csproj -c Release
 
 数据库建表 SQL 位于 `src/ClipStack.Core/Migrations/001_initial.sql`，应用首次启动自动在事务内执行，用户无需操作数据库。
 
-收藏备注字段的升级 SQL 为 `src/ClipStack.Core/Migrations/002_favorite_notes.sql`。已有 v1 数据库会自动备份并在事务内升级到 v2，备注同样使用 DPAPI 加密。
+当前程序版本为 **0.2.0**，数据库版本为 **v3**。收藏备注迁移位于 `002_favorite_notes.sql`，独立排序序号迁移位于 `003_sort_order.sql`。已有 v1/v2 数据库会先完整备份数据库、图片、密钥和配置，再在事务内自动升级；备注仍使用 DPAPI 加密。发布目录提供分版本 SQL，无需手动执行。
 
 ## 诊断入口
 
@@ -62,6 +62,7 @@ ClipStack.exe --preview "C:\temp\clipstack-preview.png" --data-dir "C:\temp\clip
 ClipStack.exe --preview-settings "C:\temp\clipstack-settings.png" --data-dir "C:\temp\clipstack-preview-data"
 ClipStack.exe --panel-test "C:\temp\panel-checks.json" --data-dir "C:\temp\clipstack-panel-data"
 ClipStack.exe --performance-test "C:\temp\performance-checks.json" --data-dir "C:\temp\clipstack-performance-data"
+ClipStack.exe --soak-test "C:\temp\soak.json" --soak-seconds 60 --data-dir "C:\temp\clipstack-soak-data"
 ```
 
 上述入口不监听或修改系统剪贴板、不注册快捷键，也不修改正式用户数据；省略 `--data-dir` 时创建临时诊断数据目录。`--preview` 的示例内容仅用于界面验收。诊断路径必须位于可写目录。
@@ -71,6 +72,8 @@ ClipStack.exe --performance-test "C:\temp\performance-checks.json" --data-dir "C
 `--performance-test` 使用合成图片与文本，检查虚拟化、可视区加载、缩略图缓存容量、延迟原图预览、搜索取消和连续保存。发布脚本会执行该检查。历史查询的前后基准与内存取舍见 [性能优化报告](docs/性能优化报告.md)。
 
 另有显式系统集成检查：`ClipStack.exe --integration-test "C:\temp\integration.json" --data-dir "C:\temp\integration-data"`。它临时修改系统剪贴板、注册诊断快捷键并打开自动关闭的粘贴测试窗口；退出时恢复原剪贴板，报告只记录布尔结果。无法安全备份原格式时终止检查。执行时请勿同时复制其他内容。
+
+完整升级备份恢复到新目录的命令为 `ClipStack.exe --restore-backup "C:\备份\history-..." --data-dir "C:\恢复\ClipStack"`；目标目录必须尚不存在，程序会校验清单后恢复，不覆盖运行中的数据。恢复后可用 `--data-dir` 打开该目录，仍须使用原 Windows 用户。旧版本仅包含单个 `.db` 的备份不适用此命令。
 
 ## 发布状态
 

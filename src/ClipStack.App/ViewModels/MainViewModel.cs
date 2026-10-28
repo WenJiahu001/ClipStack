@@ -17,6 +17,11 @@ internal sealed class MainViewModel : ObservableObject
     private bool paused;
     private bool isEditingNote;
     private bool isLoading;
+    private bool resultsCurrent = true, hasMore;
+    public bool ResultsCurrent { get => resultsCurrent; set { if (Set(ref resultsCurrent, value)) { Raise(nameof(CanUseSelection)); Raise(nameof(CanInteractHistory)); } } }
+    public bool CanInteractHistory => ResultsCurrent || IsEditingNote;
+    public bool CanUseSelection => ResultsCurrent && HasSelection;
+    public bool HasMore { get => hasMore; set { if (Set(ref hasMore, value)) Raise(nameof(ResultLabel)); } }
     public bool IsLoading
     {
         get => isLoading;
@@ -25,7 +30,7 @@ internal sealed class MainViewModel : ObservableObject
     public event Action? SearchRequested;
     public event Action? SelectionChanged;
     public event Action? EditingChanged;
-    public bool IsEditingNote { get => isEditingNote; set { if (Set(ref isEditingNote, value)) EditingChanged?.Invoke(); } }
+    public bool IsEditingNote { get => isEditingNote; set { if (Set(ref isEditingNote, value)) { Raise(nameof(CanInteractHistory)); EditingChanged?.Invoke(); } } }
 
     public string QueryText { get => queryText; set { if (Set(ref queryText, value)) SearchRequested?.Invoke(); } }
     public string StatusMessage { get => statusMessage; set => Set(ref statusMessage, value); }
@@ -43,7 +48,7 @@ internal sealed class MainViewModel : ObservableObject
         get => items;
         set { if (Set(ref items, value)) { Raise(nameof(ResultLabel)); Raise(nameof(EmptyVisibility)); Raise(nameof(EmptyTitle)); Raise(nameof(EmptyDescription)); } }
     }
-    public string ResultLabel => IsLoading && Items.Count == 0 ? "加载中…" : $"{Items.Count} 条";
+    public string ResultLabel => IsLoading && Items.Count == 0 ? "加载中…" : $"{Items.Count}{(HasMore ? "+" : "")} 条";
     public Visibility EmptyVisibility => Items.Count == 0 ? Visibility.Visible : Visibility.Collapsed;
     public string EmptyTitle => IsLoading ? "正在加载历史…" : QueryText.Length != 0 ? "没有找到匹配内容" : Filter == HistoryFilter.Favorites ? "收藏常用的内容" : "从下一次复制开始";
     public string EmptyDescription => IsLoading ? "" : QueryText.Length != 0 ? "试试更短的关键词，或切换筛选。" : Filter == HistoryFilter.Favorites ? "选中一条记录，点击「收藏」。" : "复制文字或截图，就会出现在这里。\n历史仅保存在这台电脑。";
@@ -53,7 +58,7 @@ internal sealed class MainViewModel : ObservableObject
         set
         {
             if (!Set(ref selectedItem, value)) return;
-            Raise(nameof(HasSelection)); Raise(nameof(FavoriteLabel)); Raise(nameof(TextPreviewVisibility)); Raise(nameof(ImagePreviewVisibility));
+            Raise(nameof(HasSelection)); Raise(nameof(CanUseSelection)); Raise(nameof(FavoriteLabel)); Raise(nameof(TextPreviewVisibility)); Raise(nameof(ImagePreviewVisibility));
             SelectionChanged?.Invoke();
         }
     }

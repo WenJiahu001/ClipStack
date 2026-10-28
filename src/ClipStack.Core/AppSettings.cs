@@ -15,6 +15,7 @@ public sealed record AppSettings
     public bool StartWithWindows { get; init; }
     public DisplayDensity MainWindowDensity { get; init; } = DisplayDensity.Standard;
     public bool ResetListOnActivate { get; init; } = true;
+    public bool ResetFilterOnShow { get; init; } = true;
     public bool HideAfterCopy { get; init; } = true;
     public bool ShowTrayIcon { get; init; } = true;
     public PanelPositionMode WindowPosition { get; init; } = PanelPositionMode.Remember;
