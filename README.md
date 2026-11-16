@@ -52,7 +52,7 @@ dotnet run --project tests/ClipStack.Tests/ClipStack.Tests.csproj -c Release
 
 数据库建表 SQL 位于 `src/ClipStack.Core/Migrations/001_initial.sql`，应用首次启动自动在事务内执行，用户无需操作数据库。
 
-当前程序版本为 **0.2.0**，数据库版本为 **v3**。收藏备注迁移位于 `002_favorite_notes.sql`，独立排序序号迁移位于 `003_sort_order.sql`。已有 v1/v2 数据库会先完整备份数据库、图片、密钥和配置，再在事务内自动升级；备注仍使用 DPAPI 加密。发布目录提供分版本 SQL，无需手动执行。
+当前程序版本为 **0.2.1**，数据库版本为 **v3**。收藏备注迁移位于 `002_favorite_notes.sql`，独立排序序号迁移位于 `003_sort_order.sql`。已有 v1/v2 数据库会先完整备份数据库、图片、密钥和配置，再在事务内自动升级；备注仍使用 DPAPI 加密。发布目录提供分版本 SQL，无需手动执行。
 
 ## 诊断入口
 

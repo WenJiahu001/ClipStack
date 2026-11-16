@@ -1,21 +1,21 @@
-param([Parameter(Mandatory = $true)][string]$Destination)
+﻿param([Parameter(Mandatory = $true)][string]$Destination)
 $ErrorActionPreference = 'Stop'
 $projectRoot = Split-Path $PSScriptRoot -Parent
 $nugetRoot = if ($env:NUGET_PACKAGES) { $env:NUGET_PACKAGES } else { Join-Path $env:USERPROFILE '.nuget\packages' }
 $licenses = Join-Path $Destination 'licenses'
 New-Item -ItemType Directory -Path $licenses -Force | Out-Null
-$lock = Get-Content (Join-Path $projectRoot 'src\ClipStack.Core\packages.lock.json') -Raw | ConvertFrom-Json -AsHashtable
+$lock = Get-Content (Join-Path $projectRoot 'src\ClipStack.Core\packages.lock.json') -Raw -Encoding UTF8 | ConvertFrom-Json
 $notices = [System.Collections.Generic.List[string]]::new()
 $notices.Add('ClipStack third-party notices')
 $notices.Add('The accompanying licenses directory is part of the distribution.')
 $seen = [System.Collections.Generic.HashSet[string]]::new()
-foreach ($framework in $lock.dependencies.Values) {
-    foreach ($entry in $framework.GetEnumerator()) {
-        $id = $entry.Key
+foreach ($framework in $lock.dependencies.PSObject.Properties) {
+    foreach ($entry in $framework.Value.PSObject.Properties) {
+        $id = $entry.Name
         $version = $entry.Value.resolved
         if (-not $version -or -not $seen.Add("$id/$version")) { continue }
         $packageDirectory = Join-Path $nugetRoot ($id.ToLowerInvariant() + '\' + $version)
-        [xml]$nuspec = Get-Content (Join-Path $packageDirectory ($id.ToLowerInvariant() + '.nuspec')) -Raw
+        [xml]$nuspec = Get-Content (Join-Path $packageDirectory ($id.ToLowerInvariant() + '.nuspec')) -Raw -Encoding UTF8
         $metadata = $nuspec.package.metadata
         $expression = $metadata.license.InnerText
         $notice = "$id $version`n$($metadata.copyright)`nLicense: $expression`nSource: $($metadata.repository.url)`n"

@@ -95,12 +95,15 @@ internal sealed class ClipboardMonitor : IDisposable
     private async Task CaptureAsync(int ticket, uint sequence)
     {
         int policy = policyGeneration;
-        int[] delays = { 0, 20, 40, 80, 160 };
+        // 首轮略作让步，避免与来源应用（如 OLE 刷出或二次写入）在 0ms 抢占剪贴板锁。
+        int[] delays = { 40, 60, 100, 160 };
         foreach (int delay in delays)
         {
-            if (delay != 0) await Task.Delay(delay);
+            await Task.Delay(delay);
             if (disposed || Paused || writing || policy != policyGeneration || ticket != generation || sequence == suppressedSequence
                 || sequence != NativeMethods.GetClipboardSequenceNumber()) return;
+            if (IsExcludedOwnerProcess()) return;
+            if (sequence != NativeMethods.GetClipboardSequenceNumber()) return;
             try
             {
                 DateTimeOffset copiedAt = DateTimeOffset.UtcNow;
@@ -108,9 +111,11 @@ internal sealed class ClipboardMonitor : IDisposable
                 CapturedClip? clip = null;
                 BitmapSource? image = null;
                 byte[]? png = null;
+                string? rawText = null;
+                bool hasText = false;
                 try
                 {
-                    if (ShouldExclude()) return;
+                    if (ShouldExcludeFormats()) return;
                     if (NativeMethods.IsClipboardFormatAvailable(pngFormat))
                     {
                         png = ReadGlobalBytes(pngFormat, AppSettings.MaxImageBytes);
@@ -125,13 +130,21 @@ internal sealed class ClipboardMonitor : IDisposable
                     }
                     else if (NativeMethods.IsClipboardFormatAvailable(NativeMethods.UnicodeText))
                     {
-                        string? text = ReadText();
-                        if (text == null) { Notice?.Invoke("文本超过 1 MiB，已跳过。"); return; }
-                        if (text.Length != 0) clip = CapturedClip.FromText(text);
+                        rawText = ReadRawText();
+                        if (rawText == null) { Notice?.Invoke("文本超过 1 MiB，已跳过。"); return; }
+                        hasText = true;
                     }
                     else return;
                 }
                 finally { NativeMethods.CloseClipboard(); }
+
+                if (hasText)
+                {
+                    string text = NormalizeClipboardText(rawText!);
+                    if (text.Length == 0) return;
+                    if (Encoding.UTF8.GetByteCount(text) > AppSettings.MaxTextBytes) { Notice?.Invoke("文本超过 1 MiB，已跳过。"); return; }
+                    clip = CapturedClip.FromText(text);
+                }
 
                 if (clip == null)
                 {
@@ -170,7 +183,37 @@ internal sealed class ClipboardMonitor : IDisposable
         }
     }
 
-    private bool ShouldExclude()
+    private bool IsExcludedOwnerProcess()
+    {
+        string[] excluded = settings().ExcludedProcesses;
+        if (excluded.Length == 0) return false;
+        IntPtr owner = NativeMethods.GetClipboardOwner();
+        if (owner == IntPtr.Zero) return false;
+        NativeMethods.GetWindowThreadProcessId(owner, out uint processId);
+        if (processId == 0) return false;
+        string? name = TryGetProcessName(processId);
+        return name != null && excluded.Contains(name, StringComparer.OrdinalIgnoreCase);
+    }
+
+    private static string? TryGetProcessName(uint processId)
+    {
+        IntPtr handle = NativeMethods.OpenProcess(NativeMethods.ProcessQueryLimitedInformation, false, processId);
+        if (handle != IntPtr.Zero)
+        {
+            try
+            {
+                char[] buffer = new char[1024];
+                int length = buffer.Length;
+                if (NativeMethods.QueryFullProcessImageName(handle, 0, buffer, ref length) && length > 0)
+                    return Path.GetFileNameWithoutExtension(new string(buffer, 0, length));
+            }
+            finally { NativeMethods.CloseHandle(handle); }
+        }
+        try { using var process = Process.GetProcessById((int)processId); return process.ProcessName; }
+        catch (Exception e) when (e is ArgumentException or Win32Exception or InvalidOperationException) { return null; }
+    }
+
+    private bool ShouldExcludeFormats()
     {
         if (NativeMethods.IsClipboardFormatAvailable(excludeFormat)) return true;
         if (NativeMethods.IsClipboardFormatAvailable(historyFormat))
@@ -182,15 +225,10 @@ internal sealed class ClipboardMonitor : IDisposable
                 if (pointer != IntPtr.Zero) try { if (Marshal.ReadInt32(pointer) == 0) return true; } finally { NativeMethods.GlobalUnlock(handle); }
             }
         }
-        string[] excluded = settings().ExcludedProcesses;
-        if (excluded.Length == 0) return false;
-        NativeMethods.GetWindowThreadProcessId(NativeMethods.GetClipboardOwner(), out uint processId);
-        if (processId == 0) return false;
-        try { using var process = Process.GetProcessById((int)processId); return excluded.Contains(process.ProcessName, StringComparer.OrdinalIgnoreCase); }
-        catch (Exception e) when (e is ArgumentException or Win32Exception or InvalidOperationException) { return false; }
+        return false;
     }
 
-    private static string? ReadText()
+    private static string? ReadRawText()
     {
         IntPtr handle = NativeMethods.GetClipboardData(NativeMethods.UnicodeText);
         if (handle == IntPtr.Zero) return "";
@@ -198,13 +236,14 @@ internal sealed class ClipboardMonitor : IDisposable
         if (length > (ulong)(AppSettings.MaxTextBytes + 1) * 2) return null;
         IntPtr pointer = NativeMethods.GlobalLock(handle);
         if (pointer == IntPtr.Zero) throw new ExternalException("剪贴板内容尚未就绪。");
-        try
-        {
-            string text = Marshal.PtrToStringUni(pointer, (int)(length / 2)) ?? "";
-            int terminator = text.IndexOf('\0'); if (terminator >= 0) text = text[..terminator];
-            return Encoding.UTF8.GetByteCount(text) > AppSettings.MaxTextBytes ? null : text;
-        }
+        try { return Marshal.PtrToStringUni(pointer, (int)(length / 2)) ?? ""; }
         finally { NativeMethods.GlobalUnlock(handle); }
+    }
+
+    private static string NormalizeClipboardText(string text)
+    {
+        int terminator = text.IndexOf('\0');
+        return terminator >= 0 ? text[..terminator] : text;
     }
 
     private static byte[]? ReadGlobalBytes(uint format, int max)

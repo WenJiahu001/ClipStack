@@ -7,7 +7,7 @@ namespace ClipStack.App.Platform;
 internal static class NativeMethods
 {
     internal const int ClipboardUpdate = 0x031D, HotkeyMessage = 0x0312;
-    internal const uint UnicodeText = 13, Dib = 8, DibV5 = 17, Bitmap = 2;
+    internal const uint UnicodeText = 13, Dib = 8, DibV5 = 17, Bitmap = 2, ProcessQueryLimitedInformation = 0x1000;
     [DllImport("user32.dll", SetLastError = true)] [return: MarshalAs(UnmanagedType.Bool)] internal static extern bool AddClipboardFormatListener(IntPtr hwnd);
     [DllImport("user32.dll")] [return: MarshalAs(UnmanagedType.Bool)] internal static extern bool RemoveClipboardFormatListener(IntPtr hwnd);
     [DllImport("user32.dll")] internal static extern uint GetClipboardSequenceNumber();
@@ -20,6 +20,9 @@ internal static class NativeMethods
     [DllImport("kernel32.dll")] internal static extern UIntPtr GlobalSize(IntPtr memory);
     [DllImport("kernel32.dll")] internal static extern IntPtr GlobalLock(IntPtr memory);
     [DllImport("kernel32.dll")] [return: MarshalAs(UnmanagedType.Bool)] internal static extern bool GlobalUnlock(IntPtr memory);
+    [DllImport("kernel32.dll", SetLastError = true)] internal static extern IntPtr OpenProcess(uint desiredAccess, [MarshalAs(UnmanagedType.Bool)] bool inheritHandle, uint processId);
+    [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)] [return: MarshalAs(UnmanagedType.Bool)] internal static extern bool QueryFullProcessImageName(IntPtr process, uint flags, [Out] char[] exeName, ref int size);
+    [DllImport("kernel32.dll", SetLastError = true)] [return: MarshalAs(UnmanagedType.Bool)] internal static extern bool CloseHandle(IntPtr handle);
     [DllImport("user32.dll", SetLastError = true)] [return: MarshalAs(UnmanagedType.Bool)] internal static extern bool RegisterHotKey(IntPtr hwnd, int id, uint modifiers, uint key);
     [DllImport("user32.dll")] [return: MarshalAs(UnmanagedType.Bool)] internal static extern bool UnregisterHotKey(IntPtr hwnd, int id);
     [DllImport("user32.dll")] internal static extern IntPtr GetForegroundWindow();

@@ -1,4 +1,4 @@
-param(
+﻿param(
     [string]$CertificateThumbprint,
     [string]$TimestampUrl = 'http://timestamp.digicert.com'
 )
@@ -49,7 +49,7 @@ try {
             throw '单文件启动检查超时。'
         }
         if ($smokeProcess.ExitCode -ne 0 -or -not (Test-Path $report)) { throw '单文件启动检查失败。' }
-        if (-not (Get-Content $report -Raw | ConvertFrom-Json).success) { throw '单文件数据读写验证失败。' }
+        if (-not (Get-Content $report -Raw -Encoding UTF8 | ConvertFrom-Json).success) { throw '单文件数据读写验证失败。' }
     }
     finally { $env:DOTNET_ROOT = $oldRoot; $env:DOTNET_ROOT_X64 = $oldRootX64 }
     $panelReport = Join-Path $qaDirectory 'panel-checks.json'
@@ -59,7 +59,7 @@ try {
         Stop-Process -Id $panelProcess.Id -ErrorAction SilentlyContinue
         throw '窗口交互检查超时。'
     }
-    if ($panelProcess.ExitCode -ne 0 -or -not (Get-Content -LiteralPath $panelReport -Raw | ConvertFrom-Json).success) {
+    if ($panelProcess.ExitCode -ne 0 -or -not (Get-Content -LiteralPath $panelReport -Raw -Encoding UTF8 | ConvertFrom-Json).success) {
         throw '窗口交互检查失败。'
     }
     Copy-Item -LiteralPath (Join-Path $qaDirectory 'floating-panel.png') -Destination (Join-Path $publishDirectory '悬浮效果.png') -Force
@@ -73,7 +73,7 @@ try {
         Stop-Process -Id $performanceProcess.Id -ErrorAction SilentlyContinue
         throw '性能回归检查超时。'
     }
-    if ($performanceProcess.ExitCode -ne 0 -or -not (Get-Content -LiteralPath $performanceReport -Raw | ConvertFrom-Json).success) {
+    if ($performanceProcess.ExitCode -ne 0 -or -not (Get-Content -LiteralPath $performanceReport -Raw -Encoding UTF8 | ConvertFrom-Json).success) {
         throw '性能回归检查失败。'
     }
     Copy-Item -LiteralPath $performanceReport -Destination (Join-Path $publishDirectory '性能回归检查.json') -Force
@@ -98,7 +98,7 @@ try {
     $checksum = (Get-FileHash $executable -Algorithm SHA256).Hash.ToLowerInvariant()
     [System.IO.File]::WriteAllText((Join-Path $publishDirectory 'SHA256SUMS.txt'), "$checksum  ClipStack.exe`n")
     Copy-Item -LiteralPath (Join-Path $projectRoot 'docs\使用说明.md') -Destination $publishDirectory -Force
-    $releaseVersion = ([xml](Get-Content -LiteralPath (Join-Path $projectRoot 'Directory.Build.props') -Raw)).Project.PropertyGroup.Version
+    $releaseVersion = ([xml](Get-Content -LiteralPath (Join-Path $projectRoot 'Directory.Build.props') -Raw -Encoding UTF8)).Project.PropertyGroup.Version
     Copy-Item -LiteralPath (Join-Path $projectRoot "docs\releases\v$releaseVersion.md") -Destination (Join-Path $publishDirectory '发布说明.md') -Force
     Copy-Item -LiteralPath (Join-Path $projectRoot 'LICENSE') -Destination $publishDirectory -Force
     Copy-Item -LiteralPath (Join-Path $projectRoot 'docs\第三方组件.md') -Destination $publishDirectory -Force
@@ -109,8 +109,8 @@ try {
         $benchmarkPath = Join-Path $qaDirectory $benchmark
         if (Test-Path -LiteralPath $benchmarkPath) { Copy-Item -LiteralPath $benchmarkPath -Destination $publishDirectory -Force }
     }
-    $notesSql = Get-Content -LiteralPath (Join-Path $projectRoot 'src\ClipStack.Core\Migrations\002_favorite_notes.sql') -Raw
-    $sortSql = Get-Content -LiteralPath (Join-Path $projectRoot 'src\ClipStack.Core\Migrations\003_sort_order.sql') -Raw
+    $notesSql = Get-Content -LiteralPath (Join-Path $projectRoot 'src\ClipStack.Core\Migrations\002_favorite_notes.sql') -Raw -Encoding UTF8
+    $sortSql = Get-Content -LiteralPath (Join-Path $projectRoot 'src\ClipStack.Core\Migrations\003_sort_order.sql') -Raw -Encoding UTF8
     [System.IO.File]::WriteAllText((Join-Path $publishDirectory '数据库升级.sql'), "-- 仅适用于 v1 → v3。程序会自动完整备份并升级，无需手动执行；不可重复执行。`nBEGIN IMMEDIATE;`n$notesSql`n$sortSql`nCOMMIT;`n")
     [System.IO.File]::WriteAllText((Join-Path $publishDirectory '数据库升级-v2到v3.sql'), "-- 仅适用于 v2 → v3。程序会自动完整备份并升级，无需手动执行；不可重复执行。`nBEGIN IMMEDIATE;`n$sortSql`nCOMMIT;`n")
     $archive = Join-Path $publishDirectory 'ClipStack-win-x64.zip'

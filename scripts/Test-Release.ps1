@@ -1,4 +1,4 @@
-param([string]$Executable)
+﻿param([string]$Executable)
 $ErrorActionPreference = 'Stop'
 $projectRoot = Split-Path $PSScriptRoot -Parent
 if (-not $Executable) { $Executable = Join-Path $projectRoot 'artifacts\publish\win-x64\ClipStack.exe' }
@@ -23,7 +23,7 @@ try {
     if (-not $testProcess.WaitForExit(30000)) { Stop-Process -Id $testProcess.Id; throw '中文路径冷启动超时。' }
     $timer.Stop()
     if ($testProcess.ExitCode -ne 0) { throw '中文路径冷启动失败。' }
-    $cold = Get-Content $coldReport -Raw | ConvertFrom-Json
+    $cold = Get-Content $coldReport -Raw -Encoding UTF8 | ConvertFrom-Json
     # Windows 自包含 singlefilehost 静态链接 CoreCLR，不会加载独立 coreclr.dll。
     $localRuntime = $cold.runtimeDirectory -and ([System.IO.Path]::GetFullPath($cold.runtimeDirectory).TrimEnd('\') -eq $testDirectory.TrimEnd('\'))
     $extractedRuntime = $cold.runtimeModulePath -and $cold.runtimeModulePath.StartsWith($env:DOTNET_BUNDLE_EXTRACT_BASE_DIR, [System.StringComparison]::OrdinalIgnoreCase)
